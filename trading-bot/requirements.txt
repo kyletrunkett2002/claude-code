@@ -1,0 +1,5 @@
+# tradebot has ZERO runtime dependencies — it uses only the Python standard library.
+#
+# The packages below are optional, for development only. Install with:
+#   pip install -r requirements.txt
+pytest>=7.0        # nicer test runner (tests also run via `python tests/test_tradebot.py`)

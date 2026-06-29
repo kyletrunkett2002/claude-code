@@ -1,7 +1,12 @@
 # tradebot
 
 A small but serious **crypto trading bot framework** in pure Python — zero
-third-party dependencies, fully offline-capable, 32 tests.
+third-party dependencies, fully offline-capable, 44 tests.
+
+Backtest long *and* short, across **multiple coins** at once, on data from
+**Binance, Coinbase, or Kraken**, with real **risk management**, parameter
+**optimization + walk-forward validation**, ASCII **charts and heatmaps**, and
+reproducible **config-file experiments**.
 
 The honest path to making money with an automated strategy isn't a magic
 algorithm — it's a disciplined workflow:
@@ -46,9 +51,25 @@ python -m tradebot walkforward -s sma --synthetic 800 --folds 4 --plot
 # On a real machine (no proxy), swap --synthetic for live Binance data, no key:
 python -m tradebot backtest -s breakout --symbol BTCUSDT --interval 4h --limit 1000
 
-# 5. Paper-trade live prices with fake money (Ctrl-C to stop):
+# 5. Backtest LONG + SHORT (stop-and-reverse) on Coinbase data:
+python -m tradebot backtest -s sma --source coinbase --symbol BTC-USD --allow-short
+
+# 6. Backtest one strategy across a basket of coins (diversification):
+python -m tradebot portfolio --symbols BTCUSDT,ETHUSDT,SOLUSDT --synthetic 800 -s sma
+
+# 7. Replay a saved experiment from a config file:
+python -m tradebot run examples/portfolio.config.json
+
+# 8. Paper-trade live prices with fake money (Ctrl-C to stop):
 python -m tradebot paper -s sma --symbol BTCUSDT --interval 1h --poll 60
 ```
+
+## Data sources
+
+Pass `--source binance|coinbase|kraken` (default `binance`); all are public, no
+API key. Mind each exchange's symbol format: Binance `BTCUSDT`, Coinbase
+`BTC-USD`, Kraken `XBTUSD`. Or work fully offline with `--synthetic N`, or load
+your own `--csv file.csv`.
 
 ## Strategies
 
@@ -80,6 +101,25 @@ All of these compose, on any command:
 `--risk-per-trade` is volatility-aware position sizing — the single most
 important habit separating traders who survive from those who don't.
 
+### Short-selling
+
+Add `--allow-short` to turn any strategy into a **stop-and-reverse** system: a
+SELL with no long open becomes a *short* (profit when price falls), and a BUY
+covers it before going long. Stops and targets automatically invert for shorts.
+Useful for strategies that should profit in down-trends, not just sit in cash.
+
+### Multi-coin portfolios
+
+```bash
+python -m tradebot portfolio --symbols BTCUSDT,ETHUSDT,SOLUSDT --synthetic 800 \
+    -s sma --risk-per-trade 0.02 --stop-loss 0.05
+```
+
+Capital is split equally across symbols, each backtested independently, then
+combined into one portfolio equity curve with a per-symbol breakdown. Spreading
+the same edge over uncorrelated coins is the closest thing to a free lunch:
+expect a *lower* portfolio drawdown than any single coin.
+
 ## Finding a *real* edge (not a mirage)
 
 A great backtest is easy to fake by accident: try enough parameters and one will
@@ -103,6 +143,40 @@ Walk-forward output tells you the truth:
 
 A strategy that's brilliant in-sample but mediocre out-of-sample was tuned to
 noise. **Trust the out-of-sample number, not the backtest.**
+
+### Parameter heatmaps
+
+For a 2-parameter search, add `--heatmap X,Y` to *see* the result:
+
+```bash
+python -m tradebot optimize -s sma --synthetic 800 --heatmap fast,slow
+```
+
+```
+         5 10 15 20    [fast]
+    30 @@ @@ %% %%
+    50 ## ## ## **
+    80 ++ == == --
+   120 -- :: ..
+  [slow]
+```
+
+A healthy strategy shows a **broad bright region** — many nearby settings work,
+so the edge is robust. A single bright cell in a sea of dark is a cherry-picked
+fluke that won't survive live trading.
+
+### Config-file experiments
+
+Save a whole setup as JSON and replay it reproducibly:
+
+```bash
+python -m tradebot run examples/portfolio.config.json
+```
+
+The config picks the `mode` (backtest / portfolio / optimize / walkforward /
+compare), data source, strategy, parameters, risk rules and plotting — so your
+validated experiments live in version control, not shell history. See
+`examples/portfolio.config.json`.
 
 ## How to read the metrics
 
@@ -162,16 +236,20 @@ tradebot/
   strategy.py     Strategy base class
   strategies/     sma, rsi, macd, bollinger, breakout, ensemble + registry
   risk.py         RiskConfig + RiskManager (stops, sizing, circuit breaker)
-  broker.py       PaperBroker (simulated) + LiveBroker (guarded stub)
-  data.py         live fetch / CSV / synthetic data
-  backtest.py     backtesting engine (with integrated risk)
+  broker.py       PaperBroker (long + short) + LiveBroker (guarded stub)
+  data.py         Binance/Coinbase/Kraken fetch, CSV, synthetic data
+  backtest.py     backtesting engine (risk + shorting integrated)
+  portfolio.py    multi-coin portfolio backtesting
   optimize.py     grid search + walk-forward validation
   metrics.py      return, drawdown, Sharpe, Sortino, Calmar, profit factor
-  plot.py         ASCII equity charts (no matplotlib)
+  plot.py         ASCII equity charts + parameter heatmaps (no matplotlib)
+  config.py       JSON config-file runner
   engine.py       live/paper polling loop
   cli.py          command-line interface
+examples/
+  portfolio.config.json   sample experiment config
 tests/
-  test_tradebot.py   32 offline tests
+  test_tradebot.py   44 offline tests
 ```
 
 ## Running the tests

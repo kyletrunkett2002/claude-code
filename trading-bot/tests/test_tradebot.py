@@ -10,12 +10,14 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tradebot import data, indicators
+from tradebot import config as configmod
+from tradebot import data, indicators, plot
 from tradebot.backtest import run_backtest
 from tradebot.broker import LiveBroker, PaperBroker
 from tradebot.metrics import compute
 from tradebot.model import Candle, Signal
 from tradebot.optimize import DEFAULT_GRIDS, grid_search, walk_forward
+from tradebot.portfolio import run_portfolio
 from tradebot.risk import RiskConfig, RiskManager
 from tradebot.strategies import REGISTRY, build
 from tradebot.strategies.sma_crossover import SmaCrossover
@@ -305,6 +307,116 @@ def test_walk_forward_runs_and_reports_oos():
     assert wf.folds >= 1
     assert len(wf.chosen_params) >= 1
     assert len(wf.oos_equity_curve) > 0
+
+
+# ---- short selling --------------------------------------------------------
+
+def test_short_roundtrip_profits_when_price_falls():
+    b = PaperBroker(cash=1000, fee_rate=0.0, slippage=0.0)
+    b.sell_short(0, price=100, fraction=1.0)
+    assert b.position < 0
+    eq_before = b.equity(100)
+    # Price falls to 90 -> covering should leave us richer.
+    b.cover(0, price=90)
+    assert abs(b.position) < 1e-9
+    assert b.equity(90) > eq_before
+
+
+def test_short_loses_when_price_rises():
+    b = PaperBroker(cash=1000, fee_rate=0.0, slippage=0.0)
+    b.sell_short(0, price=100, fraction=1.0)
+    b.cover(0, price=110)
+    assert b.cash < 1000  # short squeezed -> loss
+
+
+def test_short_stop_is_above_entry():
+    mgr = RiskManager(RiskConfig(stop_loss=0.10))
+    mgr.on_entry(entry_price=100, side=-1)
+    # Short stop triggers when price rises through ~110.
+    hit = mgr.protective_exit(bar_high=111, bar_low=100)
+    assert hit is not None and abs(hit - 110.0) < 1e-6
+    assert mgr.protective_exit(bar_high=105, bar_low=95) is None
+
+
+def test_allow_short_increases_exposure():
+    candles = data.synthetic(n=500, seed=11)
+    lo = run_backtest(build("sma"), candles, interval="1h", allow_short=False)
+    sh = run_backtest(build("sma"), candles, interval="1h", allow_short=True)
+    assert sh.metrics.exposure_pct >= lo.metrics.exposure_pct
+    assert min(sh.equity_curve) >= 0
+
+
+# ---- portfolio ------------------------------------------------------------
+
+def test_portfolio_aggregates_symbols():
+    coins = {f"C{i}": data.synthetic(n=400, seed=i + 1) for i in range(3)}
+    res = run_portfolio(lambda: build("sma"), coins, cash=9_000, interval="1h")
+    assert len(res.per_symbol) == 3
+    assert res.metrics.start_equity == 9_000
+    # Portfolio curve is the sum of per-symbol curves at each step.
+    n = min(len(c) for c in coins.values())
+    assert len(res.equity_curve) == n
+    assert min(res.equity_curve) >= 0
+
+
+def test_portfolio_diversification_reduces_drawdown():
+    # The basket's drawdown should not exceed the worst single component's.
+    coins = {f"C{i}": data.synthetic(n=500, seed=i * 13 + 1) for i in range(4)}
+    res = run_portfolio(lambda: build("sma"), coins, interval="1h")
+    worst = max(r.metrics.max_drawdown_pct for r in res.per_symbol.values())
+    assert res.metrics.max_drawdown_pct <= worst + 1e-6
+
+
+# ---- data adapters --------------------------------------------------------
+
+def test_fetch_dispatch_unknown_source():
+    try:
+        data.fetch("not-an-exchange")
+    except ValueError as e:
+        assert "unknown source" in str(e)
+    else:
+        raise AssertionError("expected ValueError for unknown source")
+
+
+# ---- plotting -------------------------------------------------------------
+
+def test_sparkline_and_chart_render():
+    curve = data.synthetic(n=60)
+    closes = [c.close for c in curve]
+    assert len(plot.sparkline(closes)) == len(closes)
+    chart = plot.equity_chart(closes)
+    assert "start" in chart and "│" in chart
+
+
+def test_heatmap_renders_from_grid():
+    candles = data.synthetic(n=400)
+    ranked = grid_search("sma", candles, {"fast": [5, 10], "slow": [20, 40]},
+                         interval="1h")
+    hm = plot.heatmap(ranked, "fast", "slow", "sharpe")
+    assert "[fast]" in hm and "[slow]" in hm
+
+
+# ---- config runner --------------------------------------------------------
+
+def test_config_stable_seed_is_deterministic():
+    assert configmod._stable_seed("BTCUSDT") == configmod._stable_seed("BTCUSDT")
+    assert configmod._stable_seed("BTCUSDT") != configmod._stable_seed("ETHUSDT")
+
+
+def test_config_execute_backtest_offline():
+    cfg = dict(configmod.DEFAULTS)
+    cfg.update(mode="backtest", source="synthetic", synthetic=400,
+               strategy="sma", interval="1h")
+    report = configmod.execute(cfg)
+    assert "Backtest" in report and "Total return" in report
+
+
+def test_config_execute_portfolio_offline():
+    cfg = dict(configmod.DEFAULTS)
+    cfg.update(mode="portfolio", source="synthetic", synthetic=400,
+               symbols=["AAA", "BBB"], strategy="sma", interval="1h")
+    report = configmod.execute(cfg)
+    assert "Portfolio" in report and "Per-symbol" in report
 
 
 # ---- minimal runner (no pytest required) ----------------------------------

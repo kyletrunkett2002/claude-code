@@ -55,14 +55,19 @@ class BacktestResult:
 def run_backtest(strategy: Strategy, candles: List[Candle],
                  cash: float = 10_000.0, fee_rate: float = 0.001,
                  slippage: float = 0.0005, position_fraction: float = 1.0,
-                 interval: str = "1d",
+                 interval: str = "1d", allow_short: bool = False,
                  risk: Optional[RiskConfig] = None) -> BacktestResult:
     """Run ``strategy`` over ``candles`` and return performance results.
 
-    The strategy is long/flat. Each bar, in order: protective stop/target exits
-    are checked against the bar's high/low first, then the strategy's signal is
-    applied, then the drawdown circuit breaker. Win rate and profit factor are
-    measured on closed round-trips.
+    By default the strategy is long/flat. With ``allow_short=True`` it becomes
+    a stop-and-reverse system: a SELL with no long open opens a short, and a BUY
+    covers a short before (optionally) going long.
+
+    Each bar, in order: protective stop/target exits are checked against the
+    bar's high/low first, then the strategy's signal is applied, then the
+    drawdown circuit breaker. Round-trip PnL is measured as the change in
+    account equity between entry and exit, which works for longs and shorts
+    alike. Win rate and profit factor are measured on those closed round-trips.
     """
     if risk is None:
         risk = RiskConfig(position_fraction=position_fraction)
@@ -70,7 +75,7 @@ def run_backtest(strategy: Strategy, candles: List[Candle],
     broker = PaperBroker(cash=cash, fee_rate=fee_rate, slippage=slippage)
 
     equity_curve: List[float] = []
-    cost_basis = 0.0
+    entry_equity = 0.0     # account equity right after the position was opened
     wins = 0
     closed = 0
     gross_profit = 0.0
@@ -79,20 +84,33 @@ def run_backtest(strategy: Strategy, candles: List[Candle],
     halted = False
 
     def close_position(ts: int, price: float) -> None:
-        nonlocal cost_basis, wins, closed, gross_profit, gross_loss
-        trade = broker.sell(ts, price, 1.0)
+        nonlocal wins, closed, gross_profit, gross_loss
+        if broker.position > 0:
+            trade = broker.sell(ts, price, 1.0)
+        elif broker.position < 0:
+            trade = broker.cover(ts, price)
+        else:
+            return
         if not trade:
             return
-        proceeds = trade.price * trade.quantity - trade.fee
-        pnl = proceeds - cost_basis
+        pnl = broker.equity(price) - entry_equity   # position is now flat
         if pnl > 0:
             wins += 1
             gross_profit += pnl
         else:
             gross_loss += -pnl
         closed += 1
-        cost_basis = 0.0
         manager.on_exit()
+
+    def open_position(ts: int, price: float, side: int) -> None:
+        nonlocal entry_equity
+        if side > 0:
+            trade = broker.buy(ts, price, risk.entry_fraction())
+        else:
+            trade = broker.sell_short(ts, price, risk.entry_fraction())
+        if trade:
+            entry_equity = broker.equity(price)
+            manager.on_entry(trade.price, side=side)
 
     for i in range(len(candles)):
         bar = candles[i]
@@ -100,7 +118,7 @@ def run_backtest(strategy: Strategy, candles: List[Candle],
         price = bar.close
 
         # 1) Protective exits (intrabar, before acting on new signals).
-        if broker.position > 0:
+        if broker.position != 0:
             exit_price = manager.protective_exit(bar.high, bar.low)
             if exit_price is not None:
                 close_position(bar.timestamp, exit_price)
@@ -108,15 +126,18 @@ def run_backtest(strategy: Strategy, candles: List[Candle],
         # 2) Strategy signal (skipped once the circuit breaker has tripped).
         if not halted:
             signal = strategy.evaluate(history)
-            if signal is Signal.BUY and broker.position == 0:
-                trade = broker.buy(bar.timestamp, price, risk.entry_fraction())
-                if trade:
-                    cost_basis = trade.price * trade.quantity + trade.fee
-                    manager.on_entry(trade.price)
-            elif signal is Signal.SELL and broker.position > 0:
-                close_position(bar.timestamp, price)
+            if signal is Signal.BUY:
+                if broker.position < 0:
+                    close_position(bar.timestamp, price)
+                if broker.position == 0:
+                    open_position(bar.timestamp, price, side=1)
+            elif signal is Signal.SELL:
+                if broker.position > 0:
+                    close_position(bar.timestamp, price)
+                if allow_short and broker.position == 0:
+                    open_position(bar.timestamp, price, side=-1)
 
-        if broker.position > 0:
+        if broker.position != 0:
             bars_in_market += 1
 
         equity = broker.equity(price)
@@ -125,7 +146,7 @@ def run_backtest(strategy: Strategy, candles: List[Candle],
         # 3) Circuit breaker: if drawdown limit breached, liquidate and halt.
         if manager.update_equity(equity) and not halted:
             halted = True
-            if broker.position > 0:
+            if broker.position != 0:
                 close_position(bar.timestamp, price)
                 equity_curve[-1] = broker.equity(price)
 

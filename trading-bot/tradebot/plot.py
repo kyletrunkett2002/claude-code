@@ -54,3 +54,52 @@ def equity_chart(curve: List[float], width: int = 70, height: int = 14) -> str:
     pct = (curve[-1] / curve[0] - 1) * 100 if curve[0] else 0.0
     footer = " " * 12 + f"start {curve[0]:,.0f}  →  end {curve[-1]:,.0f}  ({pct:+.1f}%)"
     return "\n".join(rows + [axis, footer])
+
+
+_SHADES = " .:-=+*#%@"
+
+
+def heatmap(grid_results, x_param: str, y_param: str, metric: str) -> str:
+    """Render a 2-D parameter heatmap from grid-search results.
+
+    Each cell shows how a (x_param, y_param) combination scored on ``metric``,
+    shaded from light (worst) to dark (best). This makes overfitting visible: a
+    healthy strategy shows a broad bright *region* (many nearby settings work);
+    a single bright cell surrounded by darkness is a fragile, cherry-picked
+    fluke that probably won't survive live.
+    """
+    cells = {}
+    xs, ys = set(), set()
+    for g in grid_results:
+        if x_param in g.params and y_param in g.params:
+            x, y = g.params[x_param], g.params[y_param]
+            xs.add(x); ys.add(y)
+            # Keep the best score if combos repeat across other params.
+            cells[(x, y)] = max(cells.get((x, y), float("-inf")), g.score)
+    if not cells:
+        return "(need a 2-parameter grid to draw a heatmap)"
+
+    xs = sorted(xs)
+    ys = sorted(ys)
+    scores = [v for v in cells.values() if v != float("-inf")]
+    lo, hi = min(scores), max(scores)
+    span = hi - lo or 1.0
+
+    def shade(val):
+        idx = round((val - lo) / span * (len(_SHADES) - 1))
+        return _SHADES[idx]
+
+    xw = max(len(str(x)) for x in xs)
+    lines = [f"  metric = {metric}   (shade: '{_SHADES[1]}'=worst {lo:.2f} "
+             f"… '{_SHADES[-1]}'=best {hi:.2f})", ""]
+    header = " " * (len(y_param) + 2) + " ".join(f"{x:>{xw}}" for x in xs)
+    lines.append(f"  {header}    [{x_param}]")
+    for y in ys:
+        row_cells = []
+        for x in xs:
+            v = cells.get((x, y))
+            row_cells.append(shade(v) * xw if v is not None and v != float("-inf")
+                             else "?" * xw)
+        lines.append(f"  {y:>{len(y_param)}} " + " ".join(row_cells))
+    lines.append(f"  [{y_param}]")
+    return "\n".join(lines)

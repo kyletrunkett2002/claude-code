@@ -62,6 +62,7 @@ class RiskConfig:
 @dataclass
 class _OpenPosition:
     entry_price: float
+    side: int                       # +1 long, -1 short
     stop_price: Optional[float]
     target_price: Optional[float]
 
@@ -81,11 +82,25 @@ class RiskManager:
 
     # -- position lifecycle -------------------------------------------------
 
-    def on_entry(self, entry_price: float) -> None:
+    def on_entry(self, entry_price: float, side: int = 1) -> None:
+        """Register a new position. ``side`` is +1 for long, -1 for short.
+
+        Stop and target levels invert for shorts: a short is hurt by price
+        *rising*, so its stop sits above entry and its target below.
+        """
         cfg = self.config
-        stop = entry_price * (1 - cfg.stop_loss) if cfg.stop_loss > 0 else None
-        target = entry_price * (1 + cfg.take_profit) if cfg.take_profit > 0 else None
-        self._pos = _OpenPosition(entry_price, stop, target)
+        stop = target = None
+        if side >= 0:  # long
+            if cfg.stop_loss > 0:
+                stop = entry_price * (1 - cfg.stop_loss)
+            if cfg.take_profit > 0:
+                target = entry_price * (1 + cfg.take_profit)
+        else:          # short
+            if cfg.stop_loss > 0:
+                stop = entry_price * (1 + cfg.stop_loss)
+            if cfg.take_profit > 0:
+                target = entry_price * (1 - cfg.take_profit)
+        self._pos = _OpenPosition(entry_price, 1 if side >= 0 else -1, stop, target)
 
     def on_exit(self) -> None:
         self._pos = None
@@ -101,10 +116,16 @@ class RiskManager:
             return None
         stop = self._pos.stop_price
         target = self._pos.target_price
-        if stop is not None and bar_low <= stop:
-            return stop
-        if target is not None and bar_high >= target:
-            return target
+        if self._pos.side > 0:   # long: stop below, target above
+            if stop is not None and bar_low <= stop:
+                return stop
+            if target is not None and bar_high >= target:
+                return target
+        else:                    # short: stop above, target below
+            if stop is not None and bar_high >= stop:
+                return stop
+            if target is not None and bar_low <= target:
+                return target
         return None
 
     # -- account-level circuit breaker -------------------------------------

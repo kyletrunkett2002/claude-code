@@ -17,7 +17,13 @@ from typing import List
 from .model import Candle
 
 BINANCE_BASE = "https://api.binance.com"
+COINBASE_BASE = "https://api.exchange.coinbase.com"
+KRAKEN_BASE = "https://api.kraken.com"
 VALID_INTERVALS = {"1m", "5m", "15m", "1h", "4h", "1d"}
+
+# Interval -> granularity in seconds, shared by Coinbase and Kraken.
+_INTERVAL_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600,
+                     "4h": 14400, "1d": 86400}
 
 
 def fetch_klines(symbol: str = "BTCUSDT", interval: str = "1h",
@@ -39,6 +45,77 @@ def fetch_klines(symbol: str = "BTCUSDT", interval: str = "1h",
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         rows = json.loads(resp.read().decode())
     return [Candle.from_binance(r) for r in rows]
+
+
+def _get_json(url: str, timeout: float):
+    req = urllib.request.Request(url, headers={"User-Agent": "tradebot/0.1"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode())
+
+
+def fetch_coinbase(symbol: str = "BTC-USD", interval: str = "1h",
+                   limit: int = 300, timeout: float = 15.0) -> List[Candle]:
+    """Fetch candles from Coinbase's public API (no key required).
+
+    Coinbase symbols use a dash, e.g. ``BTC-USD``. It returns at most 300
+    candles per request, newest-first; we normalize to oldest-first.
+    """
+    if interval not in VALID_INTERVALS:
+        raise ValueError(f"interval must be one of {sorted(VALID_INTERVALS)}")
+    granularity = _INTERVAL_SECONDS[interval]
+    url = f"{COINBASE_BASE}/products/{symbol.upper()}/candles?granularity={granularity}"
+    rows = _get_json(url, timeout)
+    # Coinbase row: [time, low, high, open, close, volume]
+    candles = [
+        Candle(int(r[0]) * 1000, float(r[3]), float(r[2]), float(r[1]),
+               float(r[4]), float(r[5]))
+        for r in rows
+    ]
+    candles.sort(key=lambda c: c.timestamp)
+    return candles[-min(limit, 300):]
+
+
+def fetch_kraken(symbol: str = "XBTUSD", interval: str = "1h",
+                 limit: int = 500, timeout: float = 15.0) -> List[Candle]:
+    """Fetch candles from Kraken's public API (no key required).
+
+    Kraken uses pairs like ``XBTUSD`` (note Bitcoin is ``XBT``). Returns up to
+    720 candles; we keep the most recent ``limit``.
+    """
+    if interval not in VALID_INTERVALS:
+        raise ValueError(f"interval must be one of {sorted(VALID_INTERVALS)}")
+    minutes = _INTERVAL_SECONDS[interval] // 60
+    url = f"{KRAKEN_BASE}/0/public/OHLC?pair={symbol.upper()}&interval={minutes}"
+    payload = _get_json(url, timeout)
+    if payload.get("error"):
+        raise RuntimeError(f"Kraken error: {payload['error']}")
+    result = payload["result"]
+    key = next(k for k in result if k != "last")
+    rows = result[key]
+    # Kraken row: [time, open, high, low, close, vwap, volume, count]
+    candles = [
+        Candle(int(r[0]) * 1000, float(r[1]), float(r[2]), float(r[3]),
+               float(r[4]), float(r[6]))
+        for r in rows
+    ]
+    return candles[-limit:]
+
+
+_SOURCES = {
+    "binance": fetch_klines,
+    "coinbase": fetch_coinbase,
+    "kraken": fetch_kraken,
+}
+
+
+def fetch(source: str = "binance", **kwargs) -> List[Candle]:
+    """Fetch candles from a named exchange: binance, coinbase, or kraken."""
+    try:
+        fn = _SOURCES[source.lower()]
+    except KeyError:
+        raise ValueError(f"unknown source {source!r}; "
+                         f"choose from {sorted(_SOURCES)}")
+    return fn(**kwargs)
 
 
 def load_csv(path: str) -> List[Candle]:

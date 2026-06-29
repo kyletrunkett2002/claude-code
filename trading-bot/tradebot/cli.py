@@ -16,6 +16,7 @@ import argparse
 import sys
 from typing import List
 
+from . import config as configmod
 from . import data as datamod
 from . import plot as plotmod
 from .backtest import run_backtest
@@ -23,6 +24,7 @@ from .broker import LiveBroker, PaperBroker
 from .engine import LiveEngine
 from .model import Candle
 from .optimize import DEFAULT_GRIDS, grid_search, walk_forward
+from .portfolio import run_portfolio
 from .risk import RiskConfig
 from .strategies import REGISTRY, build
 
@@ -32,7 +34,9 @@ def _load_candles(args) -> List[Candle]:
         return datamod.load_csv(args.csv)
     if getattr(args, "synthetic", None):
         return datamod.synthetic(n=args.synthetic)
-    return datamod.fetch_klines(args.symbol, args.interval, limit=args.limit)
+    source = getattr(args, "source", "binance")
+    return datamod.fetch(source, symbol=args.symbol, interval=args.interval,
+                         limit=args.limit)
 
 
 def _add_strategy_args(p: argparse.ArgumentParser) -> None:
@@ -89,10 +93,10 @@ def cmd_backtest(args) -> int:
     result = run_backtest(
         strategy, candles,
         cash=args.cash, fee_rate=args.fee, slippage=args.slippage,
-        interval=args.interval, risk=_build_risk(args),
+        interval=args.interval, allow_short=args.allow_short, risk=_build_risk(args),
     )
     print(f"Backtest: {strategy.name} on {len(candles)} candles "
-          f"({args.symbol} {args.interval})")
+          f"({args.symbol} {args.interval}{', long+short' if args.allow_short else ''})")
     print(result.summary())
     if args.plot:
         print("\nEquity curve:")
@@ -112,7 +116,8 @@ def cmd_optimize(args) -> int:
         return 1
     ranked = grid_search(args.strategy, candles, grid, metric=args.metric,
                          interval=args.interval, risk=_build_risk(args),
-                         cash=args.cash, fee_rate=args.fee, slippage=args.slippage)
+                         cash=args.cash, fee_rate=args.fee, slippage=args.slippage,
+                         allow_short=args.allow_short)
     if not ranked:
         print("No valid parameter combinations.", file=sys.stderr)
         return 1
@@ -123,6 +128,14 @@ def cmd_optimize(args) -> int:
         m = g.result.metrics
         print(f"  {i:<5}{g.score:>9.2f}  {m.total_return_pct:>9.2f}  "
               f"{m.max_drawdown_pct:>8.2f}  {g.params}")
+    if args.heatmap:
+        try:
+            x, y = (s.strip() for s in args.heatmap.split(","))
+        except ValueError:
+            print("--heatmap expects two parameter names, e.g. --heatmap fast,slow",
+                  file=sys.stderr)
+            return 1
+        print("\n" + plotmod.heatmap(ranked, x, y, args.metric))
     print("\n⚠️  The top in-sample result is often overfit. Confirm it with "
           "`walkforward` before trusting it.")
     return 0
@@ -138,7 +151,8 @@ def cmd_walkforward(args) -> int:
         wf = walk_forward(args.strategy, candles, grid, folds=args.folds,
                           train_ratio=args.train, metric=args.metric,
                           interval=args.interval, risk=_build_risk(args),
-                          cash=args.cash, fee_rate=args.fee, slippage=args.slippage)
+                          cash=args.cash, fee_rate=args.fee, slippage=args.slippage,
+                          allow_short=args.allow_short)
     except ValueError as e:
         print(f"Walk-forward failed: {e}", file=sys.stderr)
         return 1
@@ -160,7 +174,8 @@ def cmd_compare(args) -> int:
             if len(candles) <= strat.warmup():
                 continue
             r = run_backtest(strat, candles, cash=args.cash, fee_rate=args.fee,
-                             slippage=args.slippage, interval=args.interval, risk=risk)
+                             slippage=args.slippage, interval=args.interval,
+                             allow_short=args.allow_short, risk=risk)
             m = r.metrics
             rows.append((name, m.total_return_pct, m.max_drawdown_pct,
                          m.sharpe, m.calmar, m.num_trades))
@@ -193,6 +208,46 @@ def _clip(value: float) -> str:
     if abs(value) >= 1000:
         return f"{'>' if value > 0 else '<'}999"
     return f"{value:.2f}"
+
+
+def cmd_portfolio(args) -> int:
+    symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
+    if not symbols:
+        print("Provide --symbols sym1,sym2,...", file=sys.stderr)
+        return 1
+    if args.synthetic:
+        # Distinct synthetic series per symbol via different seeds.
+        symbol_candles = {s: datamod.synthetic(n=args.synthetic, seed=42 + i * 7)
+                          for i, s in enumerate(symbols)}
+    elif args.csv:
+        print("Portfolio mode needs one series per symbol; use --synthetic or a "
+              "live source, not a single --csv.", file=sys.stderr)
+        return 1
+    else:
+        symbol_candles = {s: datamod.fetch(args.source, symbol=s,
+                                           interval=args.interval, limit=args.limit)
+                          for s in symbols}
+    strat_params = _parse_params(args.param)
+    result = run_portfolio(
+        lambda: build(args.strategy, **strat_params), symbol_candles,
+        cash=args.cash, fee_rate=args.fee, slippage=args.slippage,
+        interval=args.interval, allow_short=args.allow_short, risk=_build_risk(args))
+    print(f"Portfolio backtest: {args.strategy} across {len(symbols)} symbols")
+    print(result.summary())
+    if args.plot:
+        print("\nPortfolio equity curve:")
+        print(plotmod.equity_chart(result.equity_curve))
+    return 0
+
+
+def cmd_run(args) -> int:
+    try:
+        cfg = configmod.load(args.config)
+    except (OSError, ValueError) as e:
+        print(f"Could not load config: {e}", file=sys.stderr)
+        return 1
+    print(configmod.execute(cfg))
+    return 0
 
 
 def cmd_paper(args) -> int:
@@ -234,6 +289,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     def data_args(p):
         p.add_argument("--symbol", default="BTCUSDT", help="trading pair")
+        p.add_argument("--source", default="binance",
+                       choices=["binance", "coinbase", "kraken"],
+                       help="exchange to fetch live data from")
         p.add_argument("--interval", default="1h",
                        choices=["1m", "5m", "15m", "1h", "4h", "1d"])
         p.add_argument("--limit", type=int, default=500, help="candles to fetch")
@@ -260,6 +318,8 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--risk-per-trade", type=float, default=0.0,
                        help="size positions to risk this fraction per trade "
                             "(needs --stop-loss)")
+        p.add_argument("--allow-short", action="store_true",
+                       help="stop-and-reverse: open shorts on SELL signals")
 
     # backtest
     bt = sub.add_parser("backtest", help="replay historical data")
@@ -274,6 +334,8 @@ def build_parser() -> argparse.ArgumentParser:
     op.add_argument("--metric", default="sharpe",
                     help="metric to maximize (sharpe, calmar, total_return_pct, ...)")
     op.add_argument("--top", type=int, default=10, help="show top N results")
+    op.add_argument("--heatmap", metavar="X,Y",
+                    help="draw a 2-param heatmap, e.g. --heatmap fast,slow")
     op.set_defaults(func=cmd_optimize)
 
     # walkforward
@@ -290,6 +352,27 @@ def build_parser() -> argparse.ArgumentParser:
     cp = sub.add_parser("compare", help="backtest every strategy and rank them")
     data_args(cp); account_args(cp); risk_args(cp)
     cp.set_defaults(func=cmd_compare)
+
+    # portfolio
+    po = sub.add_parser("portfolio", help="backtest one strategy across many coins")
+    po.add_argument("--symbols", required=True,
+                    help="comma-separated symbols, e.g. BTCUSDT,ETHUSDT,SOLUSDT")
+    po.add_argument("--source", default="binance",
+                    choices=["binance", "coinbase", "kraken"])
+    po.add_argument("--interval", default="1h",
+                    choices=["1m", "5m", "15m", "1h", "4h", "1d"])
+    po.add_argument("--limit", type=int, default=500)
+    po.add_argument("--synthetic", type=int, metavar="N",
+                    help="use N synthetic candles per symbol (offline)")
+    po.add_argument("--csv", help=argparse.SUPPRESS)
+    account_args(po); risk_args(po); _add_strategy_args(po)
+    po.add_argument("--plot", action="store_true")
+    po.set_defaults(func=cmd_portfolio)
+
+    # run (config file)
+    rn = sub.add_parser("run", help="run an experiment described by a JSON config")
+    rn.add_argument("config", help="path to a JSON config file")
+    rn.set_defaults(func=cmd_run)
 
     # paper
     pp = sub.add_parser("paper", help="trade live prices with fake money")

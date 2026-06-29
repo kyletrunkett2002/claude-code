@@ -71,7 +71,7 @@ class PaperBroker(Broker):
         return trade
 
     def sell(self, timestamp: int, price: float, fraction: float = 1.0) -> Optional[Trade]:
-        """Sell ``fraction`` of the current position."""
+        """Sell ``fraction`` of the current long position (close, never short)."""
         fraction = _clamp(fraction)
         qty = self.position * fraction
         if qty <= 0:
@@ -82,6 +82,42 @@ class PaperBroker(Broker):
         self.cash += proceeds - fee
         self.position -= qty
         trade = Trade(timestamp, Signal.SELL, fill, qty, fee, self.equity(price))
+        self.trades.append(trade)
+        return trade
+
+    def sell_short(self, timestamp: int, price: float, fraction: float = 1.0) -> Optional[Trade]:
+        """Open a short worth ``fraction`` of current equity (only when flat).
+
+        Shorting borrows the asset and sells it: you receive cash now and owe
+        the units back later. Equity stays ``cash + position * price`` with a
+        negative position, so a price *rise* correctly shows as a loss.
+        """
+        if self.position != 0:
+            return None
+        fraction = _clamp(fraction)
+        notional = self.equity(price) * fraction
+        if notional <= 0:
+            return None
+        fill = price * (1 - self.slippage)   # selling: adverse fill is lower
+        qty = notional / fill
+        fee = notional * self.fee_rate
+        self.cash += notional - fee
+        self.position -= qty
+        trade = Trade(timestamp, Signal.SELL, fill, qty, fee, self.equity(price))
+        self.trades.append(trade)
+        return trade
+
+    def cover(self, timestamp: int, price: float) -> Optional[Trade]:
+        """Buy back the entire short position."""
+        if self.position >= 0:
+            return None
+        qty = -self.position
+        fill = price * (1 + self.slippage)   # buying: adverse fill is higher
+        cost = qty * fill
+        fee = cost * self.fee_rate
+        self.cash -= cost + fee
+        self.position = 0.0
+        trade = Trade(timestamp, Signal.BUY, fill, qty, fee, self.equity(price))
         self.trades.append(trade)
         return trade
 

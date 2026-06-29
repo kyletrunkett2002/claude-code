@@ -8,6 +8,8 @@ All notable changes to tradebot are documented here. This project adheres to
 ### Added
 - **Data workflow**: `download` command and `--cache DIR` for reproducible,
   offline backtests; candle resampling to higher timeframes.
+- **Realistic market simulator** (`data.realistic_market`): GARCH volatility
+  clustering, fat tails, and a tunable known edge for practising edge detection.
 - **Strategies** (11 total): SMA crossover, RSI reversion, MACD, Bollinger
   (reversion/breakout), Donchian breakout, SuperTrend, VWAP reversion,
   Stochastic, plus three meta-strategies — Ensemble (vote), RegimeAdaptive

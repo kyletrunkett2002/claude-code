@@ -11,6 +11,7 @@ import csv
 import json
 import math
 import os
+import random
 import urllib.parse
 import urllib.request
 from typing import List, Optional
@@ -212,6 +213,59 @@ def save_trades_csv(trades, path: str) -> None:
         for t in trades:
             writer.writerow([t.timestamp, t.side.value, t.price, t.quantity,
                              t.fee, t.equity_after])
+
+
+def realistic_market(n: int = 1500, start_price: float = 30_000.0, seed: int = 7,
+                     annual_vol: float = 0.80, momentum: float = 0.0,
+                     drift: float = 0.0, interval_ms: int = 3_600_000,
+                     bars_per_year: int = 8_760) -> List[Candle]:
+    """Generate a realistic synthetic market with fat tails and vol clustering.
+
+    Unlike :func:`synthetic` (a smooth sine + noise, which is unrealistically
+    easy to trade), this models log-returns with a GARCH(1,1) volatility process
+    — calm and turbulent regimes cluster, just like real crypto — and optional
+    return autocorrelation that acts as a *tunable, known edge*:
+
+    * ``momentum = 0``   -> an efficient random walk with **no exploitable edge**.
+      Any strategy that "beats" it in a backtest is being fooled by luck, and
+      walk-forward / Monte Carlo should expose that.
+    * ``momentum > 0``   -> returns persist (trends continue), a **real edge** a
+      trend strategy can capture — and walk-forward should confirm it survives
+      out of sample.
+
+    This makes it a teaching instrument: you know the ground truth, so you can
+    check whether the validation tools correctly tell edge from illusion.
+    """
+    import math
+    rng = random.Random(seed)
+
+    base_sigma = annual_vol / math.sqrt(bars_per_year)   # per-bar volatility
+    alpha, beta = 0.10, 0.85                              # GARCH persistence ~0.95
+    omega = base_sigma ** 2 * (1 - alpha - beta)
+    sigma2 = base_sigma ** 2
+    prev_r = 0.0
+
+    candles: List[Candle] = []
+    price = start_price
+    ts = 0
+    for _ in range(n):
+        sigma2 = omega + alpha * (prev_r ** 2) + beta * sigma2
+        sigma = math.sqrt(sigma2)
+        z = rng.gauss(0.0, 1.0)
+        r = drift + momentum * prev_r + sigma * z           # mean + shock
+        prev_r = r
+
+        open_p = price
+        close_p = max(0.01, price * math.exp(r))
+        # Intrabar range scaled by this bar's volatility.
+        wick = sigma * (0.5 + rng.random())
+        high_p = max(open_p, close_p) * math.exp(wick)
+        low_p = min(open_p, close_p) * math.exp(-wick)
+        vol = 100 * (0.5 + rng.random()) * (1 + 5 * abs(z))  # volume spikes on big moves
+        candles.append(Candle(ts, open_p, high_p, low_p, close_p, vol))
+        price = close_p
+        ts += interval_ms
+    return candles
 
 
 def synthetic(n: int = 500, start_price: float = 100.0, seed: int = 42,

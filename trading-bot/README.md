@@ -3,11 +3,11 @@
 [![CI](https://github.com/kyletrunkett2002/claude-code/actions/workflows/trading-bot-ci.yml/badge.svg)](https://github.com/kyletrunkett2002/claude-code/actions/workflows/trading-bot-ci.yml)
 [![Python](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org/)
 [![Dependencies](https://img.shields.io/badge/runtime%20deps-0-brightgreen)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-67%20passing-brightgreen)](tests/test_tradebot.py)
+[![Tests](https://img.shields.io/badge/tests-70%20passing-brightgreen)](tests/test_tradebot.py)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 A small but serious **crypto trading bot framework** in pure Python — zero
-third-party dependencies, fully offline-capable, 67 tests.
+third-party dependencies, fully offline-capable, 70 tests.
 
 Backtest long *and* short, across **multiple coins** at once, on data from
 **Binance, Coinbase, or Kraken**, with real **risk management**, parameter
@@ -109,6 +109,23 @@ python -m tradebot optimize -s supertrend --symbol BTCUSDT --interval 1h --cache
 
 `--cache DIR` reads the cached CSV if present, otherwise fetches and saves it.
 Reproducible results are the bedrock of trustworthy backtesting.
+
+### Practice finding an edge (realistic market simulator)
+
+`data.realistic_market()` generates synthetic prices with **fat tails and
+volatility clustering** (a GARCH process — calm and turbulent regimes, like real
+crypto) plus a **tunable, known edge** via return autocorrelation:
+
+```python
+from tradebot.data import realistic_market, save_csv
+save_csv(realistic_market(n=2500, seed=1, momentum=0.0),  "noedge.csv")  # random walk
+save_csv(realistic_market(n=2500, seed=1, momentum=0.40), "edge.csv")    # real momentum edge
+```
+
+Because you know the ground truth, it's the perfect practice range: run
+`optimize → walkforward → montecarlo` on each and watch the tools correctly flag
+the random walk as overfit while confirming the real edge survives out of sample.
+That skill — telling a true edge from a lucky backtest — is the whole game.
 
 ## Strategies
 
@@ -337,7 +354,7 @@ tradebot/
 examples/
   portfolio.config.json   sample experiment config
 tests/
-  test_tradebot.py   67 offline tests
+  test_tradebot.py   70 offline tests
 pyproject.toml    pip-installable (`tradebot` command)
 LICENSE           MIT
 ```

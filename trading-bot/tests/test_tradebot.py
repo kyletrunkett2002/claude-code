@@ -663,6 +663,41 @@ def test_new_strategies_run_in_backtest():
         assert min(r.equity_curve) >= 0
 
 
+# ---- realistic market simulator -------------------------------------------
+
+def _lag1_autocorr(candles):
+    import math
+    rets = [math.log(candles[i].close / candles[i - 1].close)
+            for i in range(1, len(candles))]
+    m = sum(rets) / len(rets)
+    num = sum((rets[i] - m) * (rets[i - 1] - m) for i in range(1, len(rets)))
+    den = sum((r - m) ** 2 for r in rets)
+    return num / den if den else 0.0
+
+
+def test_realistic_market_basic():
+    candles = data.realistic_market(n=500, seed=3)
+    assert len(candles) == 500
+    assert all(c.close > 0 and c.high >= c.low for c in candles)
+    # High/low must bracket open and close.
+    for c in candles:
+        assert c.high >= max(c.open, c.close) - 1e-6
+        assert c.low <= min(c.open, c.close) + 1e-6
+
+
+def test_realistic_market_deterministic():
+    a = data.realistic_market(n=300, seed=11)
+    b = data.realistic_market(n=300, seed=11)
+    assert [c.close for c in a] == [c.close for c in b]
+
+
+def test_realistic_market_momentum_adds_autocorrelation():
+    flat = data.realistic_market(n=3000, seed=5, momentum=0.0)
+    trend = data.realistic_market(n=3000, seed=5, momentum=0.30)
+    # A momentum term should raise lag-1 autocorrelation meaningfully.
+    assert _lag1_autocorr(trend) > _lag1_autocorr(flat) + 0.1
+
+
 # ---- minimal runner (no pytest required) ----------------------------------
 
 def _run_all():

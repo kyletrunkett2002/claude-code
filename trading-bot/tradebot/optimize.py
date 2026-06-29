@@ -170,4 +170,6 @@ DEFAULT_GRIDS: Dict[str, Dict[str, Sequence]] = {
     "bollinger": {"period": [14, 20, 30], "num_std": [1.5, 2.0, 2.5],
                   "mode": ["reversion", "breakout"]},
     "breakout": {"entry": [10, 20, 40, 55], "exit_period": [5, 10, 20]},
+    "supertrend": {"period": [7, 10, 14], "multiplier": [2.0, 3.0, 4.0]},
+    "vwap": {"period": [10, 20, 30], "band": [0.01, 0.02, 0.03]},
 }

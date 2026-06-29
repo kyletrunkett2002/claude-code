@@ -501,6 +501,90 @@ def test_save_trades_csv():
     assert len(lines) == len(r.trades) + 1
 
 
+# ---- regime / supertrend / vwap indicators & strategies -------------------
+
+def test_adx_in_range():
+    candles = data.synthetic(n=200)
+    vals = indicators.adx([c.high for c in candles], [c.low for c in candles],
+                          [c.close for c in candles], 14)
+    present = [v for v in vals if v is not None]
+    assert present and all(0 <= v <= 100 for v in present)
+
+
+def test_adx_strong_for_steady_trend():
+    # A relentless uptrend should register high trend strength.
+    n = 200
+    candles = [Candle(i, 100 + i, 100 + i + 0.5, 100 + i - 0.5, 100 + i, 1.0)
+               for i in range(n)]
+    vals = indicators.adx([c.high for c in candles], [c.low for c in candles],
+                          [c.close for c in candles], 14)
+    last = [v for v in vals if v is not None][-1]
+    assert last > 40  # clearly trending
+
+
+def test_supertrend_direction_values():
+    candles = data.synthetic(n=120)
+    _, direction = indicators.supertrend(
+        [c.high for c in candles], [c.low for c in candles],
+        [c.close for c in candles], 10, 3.0)
+    present = [d for d in direction if d is not None]
+    assert present and set(present) <= {1, -1}
+
+
+def test_vwap_between_extremes():
+    candles = data.synthetic(n=80)
+    vw = indicators.vwap([c.high for c in candles], [c.low for c in candles],
+                         [c.close for c in candles], [c.volume for c in candles], 20)
+    for i, v in enumerate(vw):
+        if v is not None:
+            window = candles[max(0, i - 19): i + 1]
+            assert min(c.low for c in window) <= v <= max(c.high for c in window)
+
+
+def test_new_strategies_registered_and_run():
+    candles = data.synthetic(n=500)
+    for name in ("supertrend", "vwap", "regime"):
+        assert name in REGISTRY
+        r = run_backtest(build(name), candles, interval="1h")
+        assert len(r.equity_curve) == len(candles)
+        assert min(r.equity_curve) >= 0
+
+
+def test_regime_routes_by_trend_strength():
+    from tradebot.strategies.regime import RegimeAdaptive
+
+    class TrendTag(SmaCrossover):
+        def evaluate(self, history):
+            return Signal.BUY
+
+    class RevTag(SmaCrossover):
+        def evaluate(self, history):
+            return Signal.SELL
+
+    # Strong uptrend -> ADX high -> trend member (BUY) should win.
+    candles = [Candle(i, 100 + i, 100 + i + 0.5, 100 + i - 0.5, 100 + i, 1.0)
+               for i in range(200)]
+    reg = RegimeAdaptive(adx_threshold=25, trend=TrendTag(), reversion=RevTag())
+    assert reg.evaluate(candles) is Signal.BUY
+
+
+# ---- HTML report ----------------------------------------------------------
+
+def test_html_report_is_self_contained():
+    from tradebot import report
+    candles = data.synthetic(n=400)
+    r = run_backtest(build("sma"), candles, interval="1h")
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "r.html")
+        report.html_report("sma", r, candles, symbol="BTCUSDT",
+                           interval="1h", path=path)
+        with open(path) as fh:
+            doc = fh.read()
+    assert "<svg" in doc and "Total return" in doc
+    assert "http://" not in doc.replace("xmlns=\"http://www.w3.org/2000/svg\"", "")
+    assert "<script" not in doc  # no JS, fully static
+
+
 # ---- minimal runner (no pytest required) ----------------------------------
 
 def _run_all():

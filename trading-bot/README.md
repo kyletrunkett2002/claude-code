@@ -1,7 +1,7 @@
 # tradebot
 
 A small but serious **crypto trading bot framework** in pure Python — zero
-third-party dependencies, fully offline-capable, 53 tests.
+third-party dependencies, fully offline-capable, 60 tests.
 
 Backtest long *and* short, across **multiple coins** at once, on data from
 **Binance, Coinbase, or Kraken**, with real **risk management**, parameter
@@ -95,9 +95,17 @@ your own `--csv file.csv`.
 | `sma` | trend | Fast/slow moving-average crossover |
 | `macd` | trend | MACD line crossing its signal line |
 | `breakout` | trend | Donchian channel breakout (the "turtle" entry) |
+| `supertrend` | trend | ATR-based SuperTrend flip (a trader favourite) |
 | `rsi` | mean-reversion | Buy oversold, sell overbought |
 | `bollinger` | both | Band reversion *or* breakout (`-p mode=breakout`) |
+| `vwap` | mean-reversion | Buy when price stretches below rolling VWAP |
 | `ensemble` | meta | Majority vote across several strategies |
+| `regime` | meta | Reads trend strength (ADX) and switches between a trend and a reversion strategy |
+
+The `regime` strategy deserves a callout: no single approach works in every
+market, so it measures trend strength with ADX and **routes** each decision —
+trend-following when the market trends, mean-reversion when it chops. Adapting to
+the regime is one of the most robust ideas in systematic trading.
 
 Pass parameters with `-p key=value`, e.g. `-s sma -p fast=5 -p slow=30`.
 
@@ -207,6 +215,16 @@ chance of a 30%+ drawdown."* That beats a single hero number every time.
 (On `--synthetic` data these come out unrealistically rosy — run it on real
 exchange data for meaningful probabilities.)
 
+### Shareable HTML reports
+
+```bash
+python -m tradebot backtest -s supertrend --symbol BTCUSDT --html report.html
+```
+
+Writes a single self-contained `.html` file — inline SVG equity curve (strategy
+vs buy-and-hold), the full metrics table, and the trade log. No JavaScript, no
+external assets; open it in any browser or email it to someone.
+
 ### Config-file experiments
 
 Save a whole setup as JSON and replay it reproducibly:
@@ -274,10 +292,11 @@ That friction is intentional. The fastest way to go broke is to skip steps 1–4
 ```
 tradebot/
   model.py        Candle, Signal, Trade
-  indicators.py   SMA, EMA, RSI, MACD, Bollinger, ATR, Donchian (pure Python)
+  indicators.py   SMA, EMA, RSI, MACD, Bollinger, ATR, Donchian, ADX, VWAP, SuperTrend
   strategy.py     Strategy base class
-  strategies/     sma, rsi, macd, bollinger, breakout, ensemble + registry
-  risk.py         RiskConfig + RiskManager (stops, sizing, circuit breaker)
+  strategies/     sma, rsi, macd, bollinger, breakout, supertrend, vwap,
+                  ensemble, regime + registry
+  risk.py         RiskConfig + RiskManager (stops, trailing, sizing, breaker)
   broker.py       PaperBroker (long + short) + LiveBroker (guarded stub)
   data.py         Binance/Coinbase/Kraken fetch, CSV, synthetic data
   backtest.py     backtesting engine (risk + shorting integrated)
@@ -286,13 +305,14 @@ tradebot/
   monte_carlo.py  bootstrap robustness testing
   metrics.py      return, drawdown, Sharpe, Sortino, Calmar, profit factor
   plot.py         ASCII equity charts + parameter heatmaps (no matplotlib)
+  report.py       self-contained HTML reports (inline SVG)
   config.py       JSON config-file runner
   engine.py       live/paper polling loop
   cli.py          command-line interface
 examples/
   portfolio.config.json   sample experiment config
 tests/
-  test_tradebot.py   53 offline tests
+  test_tradebot.py   60 offline tests
 pyproject.toml    pip-installable (`tradebot` command)
 LICENSE           MIT
 ```

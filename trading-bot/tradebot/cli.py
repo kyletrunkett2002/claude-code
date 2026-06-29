@@ -19,6 +19,7 @@ from typing import List
 from . import config as configmod
 from . import data as datamod
 from . import plot as plotmod
+from . import report as reportmod
 from .backtest import run_backtest
 from .broker import LiveBroker, PaperBroker
 from .engine import LiveEngine
@@ -106,6 +107,11 @@ def cmd_backtest(args) -> int:
     if args.export_trades:
         datamod.save_trades_csv(result.trades, args.export_trades)
         print(f"\nWrote {len(result.trades)} executed orders to {args.export_trades}")
+    if args.html:
+        path = reportmod.html_report(strategy.name, result, candles,
+                                     symbol=args.symbol, interval=args.interval,
+                                     path=args.html)
+        print(f"\nWrote HTML report to {path} — open it in a browser.")
     verdict = "BEATS" if result.metrics.total_return_pct > result.buy_and_hold_return_pct else "trails"
     print(f"\nStrategy {verdict} buy-and-hold. "
           "Past performance never guarantees future results.")
@@ -359,6 +365,8 @@ def build_parser() -> argparse.ArgumentParser:
     bt.add_argument("--plot", action="store_true", help="draw an ASCII equity curve")
     bt.add_argument("--export-trades", metavar="PATH",
                     help="write executed orders to a CSV file")
+    bt.add_argument("--html", metavar="PATH",
+                    help="write a self-contained HTML report (charts + tables)")
     bt.set_defaults(func=cmd_backtest)
 
     # montecarlo

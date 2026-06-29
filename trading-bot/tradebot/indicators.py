@@ -284,6 +284,32 @@ def supertrend(highs: List[float], lows: List[float], closes: List[float],
     return line, direction
 
 
+def stochastic(highs: List[float], lows: List[float], closes: List[float],
+               k_period: int = 14, d_period: int = 3):
+    """Stochastic oscillator: returns (%K, %D), each in 0..100.
+
+    %K measures where the close sits within the recent high-low range (near 100
+    = closing strong at the top of the range, near 0 = weak at the bottom). %D
+    is a short SMA of %K used as a signal line. Classic oversold/overbought
+    momentum tool.
+    """
+    n = len(closes)
+    k: List[Optional[float]] = [None] * n
+    for i in range(k_period - 1, n):
+        window_high = max(highs[i - k_period + 1: i + 1])
+        window_low = min(lows[i - k_period + 1: i + 1])
+        rng = window_high - window_low
+        k[i] = 100.0 * (closes[i] - window_low) / rng if rng > 0 else 50.0
+    # %D = SMA of the non-None %K values.
+    d: List[Optional[float]] = [None] * n
+    for i in range(n):
+        if i >= k_period - 1 + d_period - 1:
+            window = k[i - d_period + 1: i + 1]
+            if all(v is not None for v in window):
+                d[i] = sum(window) / d_period
+    return k, d
+
+
 def donchian(highs: List[float], lows: List[float], period: int = 20):
     """Donchian channel: rolling (lowest_low, highest_high) over ``period``.
 

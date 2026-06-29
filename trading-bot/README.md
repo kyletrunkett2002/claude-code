@@ -1,7 +1,7 @@
 # tradebot
 
 A small but serious **crypto trading bot framework** in pure Python — zero
-third-party dependencies, fully offline-capable, 60 tests.
+third-party dependencies, fully offline-capable, 67 tests.
 
 Backtest long *and* short, across **multiple coins** at once, on data from
 **Binance, Coinbase, or Kraken**, with real **risk management**, parameter
@@ -88,6 +88,22 @@ API key. Mind each exchange's symbol format: Binance `BTCUSDT`, Coinbase
 `BTC-USD`, Kraken `XBTUSD`. Or work fully offline with `--synthetic N`, or load
 your own `--csv file.csv`.
 
+### Caching real data for reproducible, offline backtests
+
+Download once, then backtest forever without hitting the network:
+
+```bash
+# Fetch and cache 1000 BTC candles as CSV:
+python -m tradebot download --symbol BTCUSDT --interval 1h --limit 1000 --cache data_cache
+
+# Now every command can read the cache (no network, identical data each run):
+python -m tradebot backtest -s supertrend --symbol BTCUSDT --interval 1h --cache data_cache
+python -m tradebot optimize -s supertrend --symbol BTCUSDT --interval 1h --cache data_cache
+```
+
+`--cache DIR` reads the cached CSV if present, otherwise fetches and saves it.
+Reproducible results are the bedrock of trustworthy backtesting.
+
 ## Strategies
 
 | Name | Style | Idea |
@@ -99,8 +115,10 @@ your own `--csv file.csv`.
 | `rsi` | mean-reversion | Buy oversold, sell overbought |
 | `bollinger` | both | Band reversion *or* breakout (`-p mode=breakout`) |
 | `vwap` | mean-reversion | Buy when price stretches below rolling VWAP |
+| `stochastic` | mean-reversion | %K/%D crossover in oversold/overbought zones |
 | `ensemble` | meta | Majority vote across several strategies |
 | `regime` | meta | Reads trend strength (ADX) and switches between a trend and a reversion strategy |
+| `mtf` | meta | Multi-timeframe filter: only takes trades aligned with the higher-timeframe trend |
 
 The `regime` strategy deserves a callout: no single approach works in every
 market, so it measures trend strength with ADX and **routes** each decision —
@@ -292,13 +310,14 @@ That friction is intentional. The fastest way to go broke is to skip steps 1–4
 ```
 tradebot/
   model.py        Candle, Signal, Trade
-  indicators.py   SMA, EMA, RSI, MACD, Bollinger, ATR, Donchian, ADX, VWAP, SuperTrend
+  indicators.py   SMA, EMA, RSI, MACD, Bollinger, ATR, Donchian, ADX, VWAP,
+                  SuperTrend, Stochastic
   strategy.py     Strategy base class
   strategies/     sma, rsi, macd, bollinger, breakout, supertrend, vwap,
-                  ensemble, regime + registry
+                  stochastic, ensemble, regime, mtf + registry
   risk.py         RiskConfig + RiskManager (stops, trailing, sizing, breaker)
   broker.py       PaperBroker (long + short) + LiveBroker (guarded stub)
-  data.py         Binance/Coinbase/Kraken fetch, CSV, synthetic data
+  data.py         Binance/Coinbase/Kraken fetch, caching, resampling, CSV, synthetic
   backtest.py     backtesting engine (risk + shorting integrated)
   portfolio.py    multi-coin portfolio backtesting
   optimize.py     grid search + walk-forward validation
@@ -312,7 +331,7 @@ tradebot/
 examples/
   portfolio.config.json   sample experiment config
 tests/
-  test_tradebot.py   60 offline tests
+  test_tradebot.py   67 offline tests
 pyproject.toml    pip-installable (`tradebot` command)
 LICENSE           MIT
 ```

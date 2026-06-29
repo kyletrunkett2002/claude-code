@@ -585,6 +585,84 @@ def test_html_report_is_self_contained():
     assert "<script" not in doc  # no JS, fully static
 
 
+# ---- resampling & caching -------------------------------------------------
+
+def test_resample_aggregates_correctly():
+    candles = data.synthetic(n=40)
+    htf = data.resample(candles, 4)
+    assert len(htf) == 10
+    first = htf[0]
+    group = candles[:4]
+    assert first.open == group[0].open
+    assert first.close == group[3].close
+    assert first.high == max(c.high for c in group)
+    assert first.low == min(c.low for c in group)
+    assert abs(first.volume - sum(c.volume for c in group)) < 1e-6
+
+
+def test_resample_drops_partial_group():
+    candles = data.synthetic(n=42)   # 10 full groups of 4 + 2 leftover
+    assert len(data.resample(candles, 4)) == 10
+
+
+def test_cache_roundtrip(tmp_path_factory=None):
+    candles = data.synthetic(n=30)
+    with tempfile.TemporaryDirectory() as d:
+        path = data.cache_path(d, "binance", "BTCUSDT", "1h")
+        data.save_csv(candles, path)
+        assert os.path.exists(path)
+        # load_or_fetch must read the cache without any network call.
+        loaded = data.load_or_fetch("binance", "BTCUSDT", "1h", cache_dir=d)
+    assert len(loaded) == len(candles)
+
+
+# ---- stochastic & mtf strategies ------------------------------------------
+
+def test_stochastic_bounds():
+    candles = data.synthetic(n=120)
+    k, d = indicators.stochastic([c.high for c in candles], [c.low for c in candles],
+                                 [c.close for c in candles], 14, 3)
+    for series in (k, d):
+        present = [v for v in series if v is not None]
+        assert present and all(0 <= v <= 100 for v in present)
+
+
+def test_mtf_blocks_countertrend_signals():
+    from tradebot.strategies.mtf_trend import MtfTrend
+
+    class AlwaysSell(SmaCrossover):
+        def evaluate(self, history):
+            return Signal.SELL
+
+    # Strong uptrend: higher-TF MA is rising, so SELL signals must be blocked.
+    candles = [Candle(i, 100 + i, 100 + i + 0.5, 100 + i - 0.5, 100 + i, 1.0)
+               for i in range(300)]
+    mtf = MtfTrend(htf_factor=4, htf_period=20, base=AlwaysSell())
+    assert mtf.evaluate(candles) is Signal.HOLD  # countertrend SELL filtered out
+
+
+def test_mtf_allows_with_trend_signals():
+    from tradebot.strategies.mtf_trend import MtfTrend
+
+    class AlwaysBuy(SmaCrossover):
+        def evaluate(self, history):
+            return Signal.BUY
+
+    candles = [Candle(i, 100 + i, 100 + i + 0.5, 100 + i - 0.5, 100 + i, 1.0)
+               for i in range(300)]
+    mtf = MtfTrend(htf_factor=4, htf_period=20, base=AlwaysBuy())
+    assert mtf.evaluate(candles) is Signal.BUY  # with-trend BUY allowed
+
+
+def test_new_strategies_run_in_backtest():
+    candles = data.synthetic(n=600)
+    for name in ("stochastic", "mtf"):
+        assert name in REGISTRY
+        r = run_backtest(build(name), candles, interval="1h")
+        assert len(r.equity_curve) == len(candles)
+        assert min(r.equity_curve) >= 0
+
+
 # ---- minimal runner (no pytest required) ----------------------------------
 
 def _run_all():

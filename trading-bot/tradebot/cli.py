@@ -37,8 +37,8 @@ def _load_candles(args) -> List[Candle]:
     if getattr(args, "synthetic", None):
         return datamod.synthetic(n=args.synthetic)
     source = getattr(args, "source", "binance")
-    return datamod.fetch(source, symbol=args.symbol, interval=args.interval,
-                         limit=args.limit)
+    return datamod.load_or_fetch(source, symbol=args.symbol, interval=args.interval,
+                                 limit=args.limit, cache_dir=getattr(args, "cache", None))
 
 
 def _add_strategy_args(p: argparse.ArgumentParser) -> None:
@@ -286,6 +286,20 @@ def cmd_run(args) -> int:
     return 0
 
 
+def cmd_download(args) -> int:
+    candles = datamod.fetch(args.source, symbol=args.symbol,
+                            interval=args.interval, limit=args.limit)
+    path = datamod.cache_path(args.cache, args.source, args.symbol, args.interval)
+    import os
+    os.makedirs(args.cache, exist_ok=True)
+    datamod.save_csv(candles, path)
+    span = ""
+    if candles:
+        span = f" ({candles[0].timestamp}..{candles[-1].timestamp})"
+    print(f"Saved {len(candles)} {args.symbol} {args.interval} candles to {path}{span}")
+    return 0
+
+
 def cmd_paper(args) -> int:
     strategy = _build_strategy(args)
     broker = PaperBroker(cash=args.cash, fee_rate=args.fee, slippage=args.slippage)
@@ -332,6 +346,8 @@ def build_parser() -> argparse.ArgumentParser:
                        choices=["1m", "5m", "15m", "1h", "4h", "1d"])
         p.add_argument("--limit", type=int, default=500, help="candles to fetch")
         p.add_argument("--csv", help="load candles from CSV instead of fetching")
+        p.add_argument("--cache", metavar="DIR",
+                       help="read/write fetched candles in this cache directory")
         p.add_argument("--synthetic", type=int, metavar="N",
                        help="use N synthetic candles (offline, no network)")
 
@@ -423,6 +439,18 @@ def build_parser() -> argparse.ArgumentParser:
     rn = sub.add_parser("run", help="run an experiment described by a JSON config")
     rn.add_argument("config", help="path to a JSON config file")
     rn.set_defaults(func=cmd_run)
+
+    # download (cache real data locally)
+    dl = sub.add_parser("download", help="fetch candles and cache them as CSV")
+    dl.add_argument("--symbol", default="BTCUSDT")
+    dl.add_argument("--source", default="binance",
+                    choices=["binance", "coinbase", "kraken"])
+    dl.add_argument("--interval", default="1h",
+                    choices=["1m", "5m", "15m", "1h", "4h", "1d"])
+    dl.add_argument("--limit", type=int, default=1000)
+    dl.add_argument("--cache", default="data_cache",
+                    help="directory to write the CSV into (default: data_cache)")
+    dl.set_defaults(func=cmd_download)
 
     # paper
     pp = sub.add_parser("paper", help="trade live prices with fake money")

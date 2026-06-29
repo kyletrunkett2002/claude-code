@@ -14,6 +14,8 @@ from .ensemble import Ensemble
 from .supertrend import SuperTrend
 from .vwap_reversion import VwapReversion
 from .regime import RegimeAdaptive
+from .stochastic import Stochastic
+from .mtf_trend import MtfTrend
 
 REGISTRY: Dict[str, Type[Strategy]] = {
     "sma": SmaCrossover,
@@ -25,6 +27,8 @@ REGISTRY: Dict[str, Type[Strategy]] = {
     "supertrend": SuperTrend,
     "vwap": VwapReversion,
     "regime": RegimeAdaptive,
+    "stochastic": Stochastic,
+    "mtf": MtfTrend,
 }
 
 
@@ -41,5 +45,5 @@ def build(name: str, **params) -> Strategy:
 __all__ = [
     "SmaCrossover", "RsiReversion", "MacdCross", "BollingerBreakout",
     "Breakout", "Ensemble", "SuperTrend", "VwapReversion", "RegimeAdaptive",
-    "REGISTRY", "build",
+    "Stochastic", "MtfTrend", "REGISTRY", "build",
 ]

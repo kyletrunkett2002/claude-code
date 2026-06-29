@@ -10,9 +10,10 @@ from __future__ import annotations
 import csv
 import json
 import math
+import os
 import urllib.parse
 import urllib.request
-from typing import List
+from typing import List, Optional
 
 from .model import Candle
 
@@ -153,6 +154,54 @@ def save_csv(candles: List[Candle], path: str) -> None:
         writer.writerow(["timestamp", "open", "high", "low", "close", "volume"])
         for c in candles:
             writer.writerow([c.timestamp, c.open, c.high, c.low, c.close, c.volume])
+
+
+def resample(candles: List[Candle], factor: int) -> List[Candle]:
+    """Aggregate every ``factor`` candles into one higher-timeframe candle.
+
+    E.g. ``resample(hourly, 4)`` builds 4-hour candles: open = first open,
+    close = last close, high = max high, low = min low, volume = summed. A
+    trailing partial group is dropped so every output bar is complete. This is
+    how multi-timeframe analysis sees the "bigger picture" trend.
+    """
+    if factor <= 1:
+        return list(candles)
+    out: List[Candle] = []
+    for i in range(0, len(candles) - factor + 1, factor):
+        group = candles[i:i + factor]
+        out.append(Candle(
+            timestamp=group[0].timestamp,
+            open=group[0].open,
+            high=max(c.high for c in group),
+            low=min(c.low for c in group),
+            close=group[-1].close,
+            volume=sum(c.volume for c in group),
+        ))
+    return out
+
+
+def cache_path(cache_dir: str, source: str, symbol: str, interval: str) -> str:
+    safe = symbol.replace("/", "-").upper()
+    return os.path.join(cache_dir, f"{source}_{safe}_{interval}.csv")
+
+
+def load_or_fetch(source: str = "binance", symbol: str = "BTCUSDT",
+                  interval: str = "1h", limit: int = 500,
+                  cache_dir: Optional[str] = None) -> List[Candle]:
+    """Return cached candles if present, otherwise fetch and (if caching) save.
+
+    With ``cache_dir`` set, the first run downloads and writes a CSV; later runs
+    read that file, so backtests become reproducible and work offline.
+    """
+    if cache_dir:
+        path = cache_path(cache_dir, source, symbol, interval)
+        if os.path.exists(path):
+            return load_csv(path)
+        candles = fetch(source, symbol=symbol, interval=interval, limit=limit)
+        os.makedirs(cache_dir, exist_ok=True)
+        save_csv(candles, path)
+        return candles
+    return fetch(source, symbol=symbol, interval=interval, limit=limit)
 
 
 def save_trades_csv(trades, path: str) -> None:

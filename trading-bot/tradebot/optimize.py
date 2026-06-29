@@ -172,4 +172,6 @@ DEFAULT_GRIDS: Dict[str, Dict[str, Sequence]] = {
     "breakout": {"entry": [10, 20, 40, 55], "exit_period": [5, 10, 20]},
     "supertrend": {"period": [7, 10, 14], "multiplier": [2.0, 3.0, 4.0]},
     "vwap": {"period": [10, 20, 30], "band": [0.01, 0.02, 0.03]},
+    "stochastic": {"k_period": [9, 14, 21], "oversold": [15, 20],
+                   "overbought": [80, 85]},
 }

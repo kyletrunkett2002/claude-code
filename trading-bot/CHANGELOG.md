@@ -29,6 +29,12 @@ All notable changes to tradebot are documented here. This project adheres to
 - **Tooling**: pip-installable `tradebot` command, JSON config-file runner,
   trade-log CSV export, GitHub Actions CI on Python 3.8–3.12, 67 offline tests.
 
+### Tooling (later additions)
+- `--json` output on `backtest` and `compare` for piping into other tools.
+- `stats` command + `analysis.market_stats()`: volatility, skew, excess
+  kurtosis, lag-1 autocorrelation and a plain-English market character read.
+- `keltner` strategy (ATR-band breakout/reversion) — 12 strategies total.
+
 ### Performance
 - Backtester now passes each strategy only its required lookback window instead
   of the full history, turning the replay from O(n²) into O(n·window). A 5000-bar

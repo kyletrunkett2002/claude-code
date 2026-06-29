@@ -174,4 +174,6 @@ DEFAULT_GRIDS: Dict[str, Dict[str, Sequence]] = {
     "vwap": {"period": [10, 20, 30], "band": [0.01, 0.02, 0.03]},
     "stochastic": {"k_period": [9, 14, 21], "oversold": [15, 20],
                    "overbought": [80, 85]},
+    "keltner": {"period": [14, 20], "multiplier": [1.5, 2.0, 2.5],
+                "mode": ["breakout", "reversion"]},
 }

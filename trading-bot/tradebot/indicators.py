@@ -108,6 +108,26 @@ def bollinger(values: List[float], period: int = 20, num_std: float = 2.0):
     return lower, mid, upper
 
 
+def keltner(highs: List[float], lows: List[float], closes: List[float],
+            period: int = 20, atr_period: int = 10, multiplier: float = 2.0):
+    """Keltner Channels: returns (lower, middle, upper).
+
+    Like Bollinger Bands but the band width comes from ATR (true range) rather
+    than standard deviation, so it reacts to *range* expansion rather than
+    close-to-close dispersion. The middle band is an EMA. Often pairs with
+    Bollinger to spot "squeezes" (Bollinger inside Keltner = coiled volatility).
+    """
+    mid = ema(closes, period)
+    rng = atr(highs, lows, closes, atr_period)
+    lower: List[Optional[float]] = [None] * len(closes)
+    upper: List[Optional[float]] = [None] * len(closes)
+    for i in range(len(closes)):
+        if mid[i] is not None and rng[i] is not None:
+            lower[i] = mid[i] - multiplier * rng[i]
+            upper[i] = mid[i] + multiplier * rng[i]
+    return lower, mid, upper
+
+
 def macd(values: List[float], fast: int = 12, slow: int = 26, signal: int = 9):
     """MACD: returns (macd_line, signal_line, histogram).
 

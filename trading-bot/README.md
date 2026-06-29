@@ -3,11 +3,11 @@
 [![CI](https://github.com/kyletrunkett2002/claude-code/actions/workflows/trading-bot-ci.yml/badge.svg)](https://github.com/kyletrunkett2002/claude-code/actions/workflows/trading-bot-ci.yml)
 [![Python](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org/)
 [![Dependencies](https://img.shields.io/badge/runtime%20deps-0-brightgreen)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-72%20passing-brightgreen)](tests/test_tradebot.py)
+[![Tests](https://img.shields.io/badge/tests-79%20passing-brightgreen)](tests/test_tradebot.py)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 A small but serious **crypto trading bot framework** in pure Python — zero
-third-party dependencies, fully offline-capable, 72 tests.
+third-party dependencies, fully offline-capable, 79 tests.
 
 Backtest long *and* short, across **multiple coins** at once, on data from
 **Binance, Coinbase, or Kraken**, with real **risk management**, parameter
@@ -110,6 +110,17 @@ python -m tradebot optimize -s supertrend --symbol BTCUSDT --interval 1h --cache
 `--cache DIR` reads the cached CSV if present, otherwise fetches and saves it.
 Reproducible results are the bedrock of trustworthy backtesting.
 
+### Profile a market before trading it
+
+```bash
+python -m tradebot stats --symbol BTCUSDT --interval 1h --cache data_cache
+```
+
+Reports the return distribution — annualized volatility, skew, **excess
+kurtosis** (fat tails = crash risk), **lag-1 autocorrelation** (>0 trend-friendly,
+<0 reversion-friendly), and a plain-English read of the market's character. Knowing
+whether a market trends or chops tells you which style of strategy to even try.
+
 ### Practice finding an edge (realistic market simulator)
 
 `data.realistic_market()` generates synthetic prices with **fat tails and
@@ -139,6 +150,7 @@ That skill — telling a true edge from a lucky backtest — is the whole game.
 | `bollinger` | both | Band reversion *or* breakout (`-p mode=breakout`) |
 | `vwap` | mean-reversion | Buy when price stretches below rolling VWAP |
 | `stochastic` | mean-reversion | %K/%D crossover in oversold/overbought zones |
+| `keltner` | both | ATR-band breakout *or* reversion (`-p mode=reversion`) |
 | `ensemble` | meta | Majority vote across several strategies |
 | `regime` | meta | Reads trend strength (ADX) and switches between a trend and a reversion strategy |
 | `mtf` | meta | Multi-timeframe filter: only takes trades aligned with the higher-timeframe trend |
@@ -346,6 +358,7 @@ tradebot/
   optimize.py     grid search + walk-forward validation
   monte_carlo.py  bootstrap robustness testing
   metrics.py      return, drawdown, Sharpe, Sortino, Calmar, profit factor
+  analysis.py     market profiling (vol, skew, kurtosis, autocorrelation)
   plot.py         ASCII equity charts + parameter heatmaps (no matplotlib)
   report.py       self-contained HTML reports (inline SVG)
   config.py       JSON config-file runner
@@ -354,7 +367,7 @@ tradebot/
 examples/
   portfolio.config.json   sample experiment config
 tests/
-  test_tradebot.py   72 offline tests
+  test_tradebot.py   79 offline tests
 pyproject.toml    pip-installable (`tradebot` command)
 LICENSE           MIT
 ```

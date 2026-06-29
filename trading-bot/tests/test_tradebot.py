@@ -753,6 +753,27 @@ def test_cli_compare_json():
     assert sharpes == sorted(sharpes, reverse=True)
 
 
+# ---- keltner channels -----------------------------------------------------
+
+def test_keltner_band_ordering():
+    candles = data.synthetic(n=80)
+    lower, mid, upper = indicators.keltner(
+        [c.high for c in candles], [c.low for c in candles],
+        [c.close for c in candles], 20, 10, 2.0)
+    for lo, md, up in zip(lower, mid, upper):
+        if None not in (lo, md, up):
+            assert lo <= md <= up
+
+
+def test_keltner_strategy_runs_both_modes():
+    candles = data.synthetic(n=500)
+    for mode in ("breakout", "reversion"):
+        r = run_backtest(build("keltner", mode=mode), candles, interval="1h")
+        assert len(r.equity_curve) == len(candles)
+        assert min(r.equity_curve) >= 0
+    assert "keltner" in REGISTRY
+
+
 # ---- market stats ---------------------------------------------------------
 
 def test_market_stats_detects_momentum_vs_random_walk():

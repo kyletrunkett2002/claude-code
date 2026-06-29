@@ -1,80 +1,124 @@
 # tradebot
 
-A small, **dependency-free** crypto trading bot framework in pure Python.
+A small but serious **crypto trading bot framework** in pure Python — zero
+third-party dependencies, fully offline-capable, 32 tests.
 
 The honest path to making money with an automated strategy isn't a magic
-algorithm — it's a workflow:
+algorithm — it's a disciplined workflow:
 
-1. **Backtest** a strategy on historical data. Does it actually beat just
-   holding the asset, after fees and slippage?
-2. **Paper-trade** it live (real prices, fake money). Does it still hold up on
-   data it has never seen?
-3. **Only then** consider trading real money — with size you can afford to lose.
+1. **Backtest** a strategy on history. Does it beat just holding, after fees and slippage?
+2. **Optimize** its parameters — then **walk-forward validate** to check the result
+   isn't overfit garbage. *This step is where most retail traders fool themselves.*
+3. **Paper-trade** it live (real prices, fake money) on data it has never seen.
+4. **Only then** risk real money — small, with stop-losses and a drawdown circuit breaker.
 
-`tradebot` is built around that workflow. Strategies are pluggable, the
-backtester is honest (fees, slippage, no look-ahead), and going live is
-deliberately gated behind your own code change so you can't fat-finger real
-money on day one.
+`tradebot` is built around that workflow, with real risk management baked in.
 
-> ⚠️ **Reality check.** Most trading strategies lose money after costs. This is
-> a tool for *finding out whether yours does* — not a guarantee of profit. Never
-> trade money you can't afford to lose, and treat a good backtest as a reason to
-> paper-trade, not a reason to go all-in.
+> ⚠️ **Reality check.** Most trading strategies lose money after costs, and no
+> tool can guarantee profit — anyone who tells you otherwise is selling something.
+> This is a tool for *finding out whether your idea actually has an edge*, and for
+> not blowing up your account while you find out. Never trade money you can't
+> afford to lose.
 
 ## Requirements
 
-Python 3.8+. **No third-party packages** — it uses only the standard library.
-(`requirements.txt` lists optional dev tools.)
+Python 3.8+. **No third-party packages** — standard library only.
 
 ## Quickstart
 
 ```bash
 cd trading-bot
 
-# Backtest on offline synthetic data (no network needed):
-python -m tradebot backtest --strategy sma --synthetic 500 -p fast=10 -p slow=30
+# 1. Compare every built-in strategy on offline synthetic data (no network):
+python -m tradebot compare --synthetic 800 --interval 1h
 
-# Backtest on real Binance history (needs internet, no API key):
-python -m tradebot backtest --strategy sma --symbol BTCUSDT --interval 1h --limit 500
+# 2. Backtest one, with risk management and an ASCII equity chart:
+python -m tradebot backtest -s sma --synthetic 800 \
+    --stop-loss 0.05 --take-profit 0.15 --risk-per-trade 0.02 \
+    --max-drawdown 0.25 --plot
 
-# Compare with the RSI mean-reversion strategy:
-python -m tradebot backtest --strategy rsi --symbol ETHUSDT --interval 4h -p period=14
+# 3. Search for the best parameters:
+python -m tradebot optimize -s sma --synthetic 800 --metric sharpe --top 10
 
-# Paper-trade live prices with fake money (Ctrl-C to stop):
-python -m tradebot paper --strategy sma --symbol BTCUSDT --interval 1h --poll 60
+# 4. Validate that result out-of-sample (the anti-overfitting check):
+python -m tradebot walkforward -s sma --synthetic 800 --folds 4 --plot
+
+# On a real machine (no proxy), swap --synthetic for live Binance data, no key:
+python -m tradebot backtest -s breakout --symbol BTCUSDT --interval 4h --limit 1000
+
+# 5. Paper-trade live prices with fake money (Ctrl-C to stop):
+python -m tradebot paper -s sma --symbol BTCUSDT --interval 1h --poll 60
 ```
 
-Example backtest output:
+## Strategies
+
+| Name | Style | Idea |
+|---|---|---|
+| `sma` | trend | Fast/slow moving-average crossover |
+| `macd` | trend | MACD line crossing its signal line |
+| `breakout` | trend | Donchian channel breakout (the "turtle" entry) |
+| `rsi` | mean-reversion | Buy oversold, sell overbought |
+| `bollinger` | both | Band reversion *or* breakout (`-p mode=breakout`) |
+| `ensemble` | meta | Majority vote across several strategies |
+
+Pass parameters with `-p key=value`, e.g. `-s sma -p fast=5 -p slow=30`.
+
+## Risk management (the part that keeps you solvent)
+
+Strategies decide *when* to trade; risk rules decide *how much* and *when to bail*.
+All of these compose, on any command:
+
+| Flag | What it does |
+|---|---|
+| `--stop-loss 0.05` | Exit if price falls 5% below entry (checked intrabar against the low) |
+| `--take-profit 0.15` | Exit if price rises 15% above entry |
+| `--risk-per-trade 0.02` | Size each position so a stop-out loses ~2% of equity (needs `--stop-loss`). Tighter stop → bigger size, constant dollar risk |
+| `--max-drawdown 0.25` | Circuit breaker: liquidate and halt trading if equity falls 25% from its peak |
+| `--fraction 0.5` | Fixed: deploy 50% of cash per entry |
+| `--max-position 0.3` | Hard cap on cash deployed per trade |
+
+`--risk-per-trade` is volatility-aware position sizing — the single most
+important habit separating traders who survive from those who don't.
+
+## Finding a *real* edge (not a mirage)
+
+A great backtest is easy to fake by accident: try enough parameters and one will
+look brilliant purely by luck. Two commands guard against this.
+
+```bash
+# Grid-search parameters, ranked by a metric:
+python -m tradebot optimize -s breakout --synthetic 1000 --metric calmar
+
+# Walk-forward: optimize on one slice, test on the NEXT, unseen slice, repeat.
+python -m tradebot walkforward -s breakout --synthetic 1000 --folds 5
+```
+
+Walk-forward output tells you the truth:
 
 ```
-Backtest: sma_crossover on 500 candles (BTCUSDT 1h)
-  Start equity     : 10,000.00
-  End equity       : 26,367.83
-  Total return     : +163.68%
-  Buy & hold return: +20.26%
-  Edge vs hold     : +143.42%
-  Max drawdown     : 8.14%
-  Sharpe (annual)  : 28.55
-  Trades (closed)  : 3
-  Win rate         : 100.00%
+  In-sample  metric    : +23.94  (optimized)
+  Out-of-sample metric : +6.70   (honest)
+  Verdict              : likely OVERFIT — be skeptical
 ```
 
-(Those numbers are from synthetic demo data — real markets are much harder. The
-point is the *comparison*: a strategy is only interesting if it beats
-buy-and-hold after costs.)
+A strategy that's brilliant in-sample but mediocre out-of-sample was tuned to
+noise. **Trust the out-of-sample number, not the backtest.**
 
 ## How to read the metrics
 
 | Metric | What it tells you |
 |---|---|
-| **Total return** vs **Buy & hold** | The only number that matters: did the strategy beat just holding? |
-| **Max drawdown** | Worst peak-to-trough loss. A 60% drawdown is untradeable for most people, however good the return. |
-| **Sharpe** | Return per unit of risk. Higher is smoother. Negative means you're being paid to lose. |
-| **Win rate** | Share of round-trips that profited. High return + low win rate = a few big winners (fragile). |
+| **Total return** vs **Buy & hold** | Did the strategy beat just holding? The only goal. |
+| **CAGR** | Return annualized — lets you compare across timeframes. |
+| **Max drawdown** | Worst peak-to-trough loss. A 60% drawdown is untradeable for most people. |
+| **Sharpe** | Return per unit of total volatility. Higher = smoother. |
+| **Sortino** | Like Sharpe but only penalizes *downside* volatility. |
+| **Calmar** | CAGR ÷ max drawdown. Return earned per unit of pain. |
+| **Profit factor** | Gross wins ÷ gross losses. >1 makes money; <1 loses. |
+| **Exposure** | Share of time holding a position (idle cash isn't at risk). |
+| **Win rate** | Share of round-trips that profited. High return + low win rate = a few big winners. |
 
 ## Writing your own strategy
-
-A strategy is one method. Drop a file in `tradebot/strategies/` and register it:
 
 ```python
 from tradebot.model import Candle, Signal
@@ -87,27 +131,25 @@ class MyStrategy(Strategy):
         return 20  # candles needed before signals are valid
 
     def evaluate(self, history: list[Candle]) -> Signal:
-        # history[-1] is the latest closed candle. No look-ahead.
-        if some_condition(history):
-            return Signal.BUY
-        if other_condition(history):
-            return Signal.SELL
+        # history[-1] is the latest closed candle. No look-ahead allowed.
+        ...
         return Signal.HOLD
 ```
 
-Then add it to `REGISTRY` in `tradebot/strategies/__init__.py` and it's
-available as `--strategy mine`.
+Register it in `tradebot/strategies/__init__.py` and it's available everywhere as
+`--strategy mine`.
 
 ## Going live (read this twice)
 
-Live trading is **disabled by design**. `tradebot live` refuses to run. To
-trade real money you must, yourself:
+Live trading is **disabled by design**. `tradebot live` refuses to run. To trade
+real money you must, yourself:
 
-1. Validate your strategy in `backtest` **and** `paper` mode first.
-2. Open `tradebot/broker.py`, implement signed order placement for your
-   exchange in `LiveBroker`, and provide API keys with trade permission.
+1. Validate in `backtest`, `optimize`, `walkforward`, **and** `paper` first.
+2. Implement signed order placement for your exchange in
+   `tradebot/broker.py:LiveBroker` and supply API keys with trade permission.
 3. Flip the guard in `LiveBroker._require_live_enabled`.
-4. Start with tiny size (`--fraction 0.05`) and money you can afford to lose.
+4. Start tiny (`--risk-per-trade 0.01`, `--max-drawdown 0.15`) with money you can
+   afford to lose.
 
 That friction is intentional. The fastest way to go broke is to skip steps 1–4.
 
@@ -116,29 +158,31 @@ That friction is intentional. The fastest way to go broke is to skip steps 1–4
 ```
 tradebot/
   model.py        Candle, Signal, Trade
-  indicators.py   SMA, EMA, RSI (pure Python)
+  indicators.py   SMA, EMA, RSI, MACD, Bollinger, ATR, Donchian (pure Python)
   strategy.py     Strategy base class
-  strategies/     SMA crossover, RSI reversion, registry
+  strategies/     sma, rsi, macd, bollinger, breakout, ensemble + registry
+  risk.py         RiskConfig + RiskManager (stops, sizing, circuit breaker)
   broker.py       PaperBroker (simulated) + LiveBroker (guarded stub)
   data.py         live fetch / CSV / synthetic data
-  backtest.py     backtesting engine
-  metrics.py      return, drawdown, Sharpe, win rate
+  backtest.py     backtesting engine (with integrated risk)
+  optimize.py     grid search + walk-forward validation
+  metrics.py      return, drawdown, Sharpe, Sortino, Calmar, profit factor
+  plot.py         ASCII equity charts (no matplotlib)
   engine.py       live/paper polling loop
   cli.py          command-line interface
 tests/
-  test_tradebot.py   14 offline tests
+  test_tradebot.py   32 offline tests
 ```
 
 ## Running the tests
 
 ```bash
 python tests/test_tradebot.py     # no dependencies
-# or, if you have pytest:
-python -m pytest
+# or, with pytest:  python -m pytest
 ```
 
 ## Disclaimer
 
-This software is for education and research. It is **not** financial advice.
-Trading cryptocurrencies carries substantial risk of loss. You are solely
-responsible for any trades you place with it.
+For education and research only. **Not** financial advice. Trading
+cryptocurrencies carries substantial risk of loss. You alone are responsible for
+any trades you place with this software.

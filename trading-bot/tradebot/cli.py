@@ -16,6 +16,7 @@ import argparse
 import sys
 from typing import List
 
+from . import analysis as analysismod
 from . import config as configmod
 from . import data as datamod
 from . import plot as plotmod
@@ -313,6 +314,22 @@ def cmd_run(args) -> int:
     return 0
 
 
+def cmd_stats(args) -> int:
+    candles = _load_candles(args)
+    try:
+        stats = analysismod.market_stats(candles, interval=args.interval)
+    except ValueError as e:
+        print(f"Cannot compute stats: {e}", file=sys.stderr)
+        return 1
+    if getattr(args, "json", False):
+        import json
+        print(json.dumps(stats.as_dict(), indent=2))
+        return 0
+    print(f"Market statistics: {args.symbol} {args.interval} ({len(candles)} candles)")
+    print(stats.summary())
+    return 0
+
+
 def cmd_download(args) -> int:
     candles = datamod.fetch(args.source, symbol=args.symbol,
                             interval=args.interval, limit=args.limit)
@@ -472,6 +489,12 @@ def build_parser() -> argparse.ArgumentParser:
     rn = sub.add_parser("run", help="run an experiment described by a JSON config")
     rn.add_argument("config", help="path to a JSON config file")
     rn.set_defaults(func=cmd_run)
+
+    # stats (profile a market)
+    st = sub.add_parser("stats", help="profile a market's return distribution")
+    data_args(st)
+    st.add_argument("--json", action="store_true", help="print stats as JSON")
+    st.set_defaults(func=cmd_stats)
 
     # download (cache real data locally)
     dl = sub.add_parser("download", help="fetch candles and cache them as CSV")

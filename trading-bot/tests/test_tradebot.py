@@ -753,6 +753,41 @@ def test_cli_compare_json():
     assert sharpes == sorted(sharpes, reverse=True)
 
 
+# ---- market stats ---------------------------------------------------------
+
+def test_market_stats_detects_momentum_vs_random_walk():
+    from tradebot.analysis import market_stats
+    flat = market_stats(data.realistic_market(n=3000, seed=5, momentum=0.0), "1h")
+    trend = market_stats(data.realistic_market(n=3000, seed=5, momentum=0.35), "1h")
+    assert abs(flat.lag1_autocorr) < 0.06          # ~ random walk
+    assert trend.lag1_autocorr > 0.15              # clearly trending
+    assert "random walk" in flat.character()
+    assert "momentum" in trend.character()
+
+
+def test_market_stats_fields_sane():
+    from tradebot.analysis import market_stats
+    s = market_stats(data.synthetic(n=400), "1h")
+    assert 0 <= s.pct_positive_bars <= 100
+    assert s.annual_vol_pct >= 0
+    assert s.buy_hold_max_drawdown_pct >= 0
+    assert s.worst_bar_pct <= s.best_bar_pct
+
+
+def test_cli_stats_json():
+    import io
+    import json as _json
+    from contextlib import redirect_stdout
+    from tradebot.cli import main
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = main(["stats", "--synthetic", "400", "--json"])
+    assert rc == 0
+    payload = _json.loads(buf.getvalue())
+    assert "lag1_autocorr" in payload and "annual_vol_pct" in payload
+
+
 # ---- minimal runner (no pytest required) ----------------------------------
 
 def _run_all():

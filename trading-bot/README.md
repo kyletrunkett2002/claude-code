@@ -1,5 +1,11 @@
 # tradebot
 
+[![CI](https://github.com/kyletrunkett2002/claude-code/actions/workflows/trading-bot-ci.yml/badge.svg)](https://github.com/kyletrunkett2002/claude-code/actions/workflows/trading-bot-ci.yml)
+[![Python](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org/)
+[![Dependencies](https://img.shields.io/badge/runtime%20deps-0-brightgreen)](pyproject.toml)
+[![Tests](https://img.shields.io/badge/tests-67%20passing-brightgreen)](tests/test_tradebot.py)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 A small but serious **crypto trading bot framework** in pure Python — zero
 third-party dependencies, fully offline-capable, 67 tests.
 

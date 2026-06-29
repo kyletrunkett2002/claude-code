@@ -1,0 +1,21 @@
+{
+  "_comment": "Example tradebot config. Run with: python -m tradebot run examples/portfolio.config.json",
+  "mode": "portfolio",
+  "source": "synthetic",
+  "synthetic": 800,
+  "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
+  "interval": "1h",
+  "strategy": "sma",
+  "params": { "fast": 10, "slow": 30 },
+  "cash": 30000,
+  "fee": 0.001,
+  "slippage": 0.0005,
+  "allow_short": false,
+  "risk": {
+    "stop_loss": 0.05,
+    "take_profit": 0.15,
+    "risk_per_trade": 0.02,
+    "max_drawdown": 0.25
+  },
+  "plot": true
+}

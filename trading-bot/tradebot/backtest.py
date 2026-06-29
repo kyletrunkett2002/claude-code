@@ -116,9 +116,13 @@ def run_backtest(strategy: Strategy, candles: List[Candle],
             entry_equity = broker.equity(price)
             manager.on_entry(trade.price, side=side)
 
+    window = strategy.lookback()
     for i in range(len(candles)):
         bar = candles[i]
-        history = candles[: i + 1]
+        if window and i + 1 > window:
+            history = candles[i + 1 - window: i + 1]
+        else:
+            history = candles[: i + 1]
         price = bar.close
 
         # 1) Protective exits (intrabar, before acting on new signals).

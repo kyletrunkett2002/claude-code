@@ -32,5 +32,18 @@ class Strategy(ABC):
         """How many candles are needed before signals are meaningful."""
         return 0
 
+    def lookback(self) -> int:
+        """How many recent candles ``evaluate`` actually needs.
+
+        The backtester passes only the last ``lookback()`` candles instead of the
+        full history, turning an O(n^2) replay into O(n * lookback). A generous
+        multiple of ``warmup`` is used so recursive indicators (EMA, RSI, ATR,
+        SuperTrend) have more than enough lead-in to be numerically identical to
+        the full-history result. Return ``0`` to opt out and always receive the
+        full history (used by strategies whose logic depends on a stable
+        anchoring of the whole series, e.g. multi-timeframe resampling).
+        """
+        return max(self.warmup() * 4, 400)
+
     def __repr__(self) -> str:  # pragma: no cover - cosmetic
         return f"<{type(self).__name__} {self.name}>"

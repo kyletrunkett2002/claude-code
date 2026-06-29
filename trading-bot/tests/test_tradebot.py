@@ -698,6 +698,27 @@ def test_realistic_market_momentum_adds_autocorrelation():
     assert _lag1_autocorr(trend) > _lag1_autocorr(flat) + 0.1
 
 
+# ---- performance windowing -------------------------------------------------
+
+def test_lookback_default_is_bounded():
+    # Simple strategies should bound their history for O(n*window) backtests.
+    assert build("sma").lookback() > 0
+    # The multi-timeframe strategy opts out (needs stable resample anchoring).
+    assert build("mtf").lookback() == 0
+
+
+def test_windowing_matches_full_history():
+    # Passing only the last `lookback` candles must give identical results to
+    # replaying the full history — the window is generous enough to be exact.
+    candles = data.realistic_market(n=1000, seed=2, momentum=0.2)
+    for name in REGISTRY:
+        win = run_backtest(build(name), candles, interval="1h")
+        s_full = build(name)
+        s_full.lookback = lambda: 0          # force full history
+        full = run_backtest(s_full, candles, interval="1h")
+        assert win.equity_curve == full.equity_curve, f"{name} differs when windowed"
+
+
 # ---- minimal runner (no pytest required) ----------------------------------
 
 def _run_all():

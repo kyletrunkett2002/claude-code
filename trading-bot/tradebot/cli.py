@@ -132,7 +132,7 @@ def cmd_montecarlo(args) -> int:
               "candles or different parameters.", file=sys.stderr)
         return 1
     mc = bootstrap(result.trade_returns, simulations=args.sims,
-                   big_drawdown_pct=args.big_drawdown)
+                   big_drawdown_pct=args.big_drawdown, seed=args.seed)
     print(f"Monte Carlo robustness: {strategy.name} ({args.symbol} {args.interval})")
     print(f"  Actual backtest return : {result.metrics.total_return_pct:+.2f}% "
           f"from {len(result.trade_returns)} trades\n")
@@ -391,6 +391,8 @@ def build_parser() -> argparse.ArgumentParser:
     mc.add_argument("--sims", type=int, default=2000, help="number of simulations")
     mc.add_argument("--big-drawdown", type=float, default=30.0,
                     help="drawdown %% to report a probability for")
+    mc.add_argument("--seed", type=int, default=7,
+                    help="RNG seed (vary it to confirm results are stable)")
     mc.set_defaults(func=cmd_montecarlo)
 
     # optimize

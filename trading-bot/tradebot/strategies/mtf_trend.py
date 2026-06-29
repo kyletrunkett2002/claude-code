@@ -42,6 +42,13 @@ class MtfTrend(Strategy):
         return max(self.base.warmup(),
                    (self.htf_period + 2) * self.htf_factor)
 
+    def lookback(self) -> int:
+        # Opt out of windowing: resample() groups from the start of whatever
+        # list it gets, so a moving window would shift the higher-timeframe bar
+        # boundaries every bar. Use the full history to keep that anchoring
+        # stable and the signals consistent.
+        return 0
+
     def _htf_direction(self, history: List[Candle]) -> int:
         """+1 if the higher-timeframe MA is rising, -1 if falling, 0 if unknown."""
         htf = resample(history, self.htf_factor)

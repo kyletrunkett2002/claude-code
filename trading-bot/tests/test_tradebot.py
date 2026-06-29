@@ -719,6 +719,40 @@ def test_windowing_matches_full_history():
         assert win.equity_curve == full.equity_curve, f"{name} differs when windowed"
 
 
+# ---- CLI json output ------------------------------------------------------
+
+def test_cli_backtest_json(capsys=None):
+    import io
+    import json as _json
+    from contextlib import redirect_stdout
+    from tradebot.cli import main
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = main(["backtest", "-s", "sma", "--synthetic", "400", "--json"])
+    assert rc == 0
+    payload = _json.loads(buf.getvalue())
+    assert payload["strategy"] == "sma_crossover"
+    assert "sharpe" in payload["metrics"]
+
+
+def test_cli_compare_json():
+    import io
+    import json as _json
+    from contextlib import redirect_stdout
+    from tradebot.cli import main
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = main(["compare", "--synthetic", "400", "--json"])
+    assert rc == 0
+    payload = _json.loads(buf.getvalue())
+    assert isinstance(payload["strategies"], list) and payload["strategies"]
+    # Ranked best-first by Sharpe.
+    sharpes = [s["sharpe"] for s in payload["strategies"]]
+    assert sharpes == sorted(sharpes, reverse=True)
+
+
 # ---- minimal runner (no pytest required) ----------------------------------
 
 def _run_all():

@@ -98,6 +98,19 @@ def cmd_backtest(args) -> int:
         cash=args.cash, fee_rate=args.fee, slippage=args.slippage,
         interval=args.interval, allow_short=args.allow_short, risk=_build_risk(args),
     )
+    if getattr(args, "json", False):
+        import json
+        print(json.dumps({
+            "strategy": strategy.name,
+            "symbol": args.symbol,
+            "interval": args.interval,
+            "candles": len(candles),
+            "allow_short": args.allow_short,
+            "buy_and_hold_return_pct": result.buy_and_hold_return_pct,
+            "halted": result.halted,
+            "metrics": result.metrics.as_dict(),
+        }, indent=2))
+        return 0
     print(f"Backtest: {strategy.name} on {len(candles)} candles "
           f"({args.symbol} {args.interval}{', long+short' if args.allow_short else ''})")
     print(result.summary())
@@ -221,6 +234,20 @@ def cmd_compare(args) -> int:
     bnh = 0.0
     if candles:
         bnh = (candles[-1].close / candles[0].close - 1) * 100
+    if getattr(args, "json", False):
+        import json
+        print(json.dumps({
+            "symbol": args.symbol,
+            "interval": args.interval,
+            "candles": len(candles),
+            "buy_and_hold_return_pct": round(bnh, 2),
+            "strategies": [
+                {"strategy": name, "return_pct": ret, "max_drawdown_pct": dd,
+                 "sharpe": sharpe, "calmar": calmar, "trades": n}
+                for name, ret, dd, sharpe, calmar, n in rows
+            ],
+        }, indent=2))
+        return 0
     print(f"Strategy comparison ({args.symbol} {args.interval}, "
           f"{len(candles)} candles). Buy & hold: {bnh:+.2f}%\n")
     print(f"  {'strategy':<12}{'return%':>10}{'maxDD%':>9}{'Sharpe':>9}"
@@ -383,6 +410,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="write executed orders to a CSV file")
     bt.add_argument("--html", metavar="PATH",
                     help="write a self-contained HTML report (charts + tables)")
+    bt.add_argument("--json", action="store_true",
+                    help="print metrics as JSON instead of a text report")
     bt.set_defaults(func=cmd_backtest)
 
     # montecarlo
@@ -419,6 +448,8 @@ def build_parser() -> argparse.ArgumentParser:
     # compare
     cp = sub.add_parser("compare", help="backtest every strategy and rank them")
     data_args(cp); account_args(cp); risk_args(cp)
+    cp.add_argument("--json", action="store_true",
+                    help="print the ranking as JSON instead of a table")
     cp.set_defaults(func=cmd_compare)
 
     # portfolio

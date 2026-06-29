@@ -16,6 +16,7 @@ from tradebot.backtest import run_backtest
 from tradebot.broker import LiveBroker, PaperBroker
 from tradebot.metrics import compute
 from tradebot.model import Candle, Signal
+from tradebot.monte_carlo import bootstrap
 from tradebot.optimize import DEFAULT_GRIDS, grid_search, walk_forward
 from tradebot.portfolio import run_portfolio
 from tradebot.risk import RiskConfig, RiskManager
@@ -417,6 +418,87 @@ def test_config_execute_portfolio_offline():
                symbols=["AAA", "BBB"], strategy="sma", interval="1h")
     report = configmod.execute(cfg)
     assert "Portfolio" in report and "Per-symbol" in report
+
+
+# ---- trailing stop --------------------------------------------------------
+
+def test_trailing_stop_ratchets_up_for_long():
+    mgr = RiskManager(RiskConfig(trailing_stop=0.10))
+    mgr.on_entry(entry_price=100, side=1)
+    # Price runs up to 150; trailing stop should now sit near 135.
+    mgr.update_trailing(bar_high=150, bar_low=100)
+    hit = mgr.protective_exit(bar_high=150, bar_low=134)  # dips to 134 < 135
+    assert hit is not None and abs(hit - 135.0) < 1e-6
+
+
+def test_trailing_stop_never_loosens():
+    mgr = RiskManager(RiskConfig(trailing_stop=0.10))
+    mgr.on_entry(entry_price=100, side=1)
+    mgr.update_trailing(bar_high=150, bar_low=100)   # stop -> 135
+    mgr.update_trailing(bar_high=120, bar_low=110)   # lower high must NOT lower stop
+    hit = mgr.protective_exit(bar_high=120, bar_low=134)
+    assert hit is not None and abs(hit - 135.0) < 1e-6
+
+
+def test_trailing_stop_locks_in_profit_in_backtest():
+    candles = data.synthetic(n=500, seed=4)
+    r = run_backtest(build("sma"), candles, interval="1h",
+                     risk=RiskConfig(trailing_stop=0.05))
+    assert min(r.equity_curve) >= 0
+    assert isinstance(r.trade_returns, list)
+
+
+# ---- monte carlo ----------------------------------------------------------
+
+def test_bootstrap_distribution_basic():
+    # A mix of winners and losers with positive expectancy.
+    returns = [0.10, -0.05, 0.08, -0.04, 0.06, -0.03] * 5
+    mc = bootstrap(returns, simulations=500, seed=1)
+    assert mc.simulations == 500
+    assert mc.return_p5 <= mc.return_p50 <= mc.return_p95
+    assert 0.0 <= mc.prob_loss_pct <= 100.0
+
+
+def test_bootstrap_all_losers_high_loss_probability():
+    mc = bootstrap([-0.05, -0.10, -0.02] * 10, simulations=300, seed=2)
+    assert mc.prob_loss_pct > 90.0   # losing trades -> almost always lose
+
+
+def test_bootstrap_deterministic_with_seed():
+    returns = [0.05, -0.03, 0.04, -0.02] * 8
+    a = bootstrap(returns, simulations=400, seed=99)
+    b = bootstrap(returns, simulations=400, seed=99)
+    assert a.return_p50 == b.return_p50 and a.drawdown_p95 == b.drawdown_p95
+
+
+def test_bootstrap_no_trades_raises():
+    try:
+        bootstrap([], simulations=10)
+    except ValueError as e:
+        assert "no trades" in str(e)
+    else:
+        raise AssertionError("expected ValueError when there are no trades")
+
+
+def test_backtest_records_trade_returns():
+    candles = data.synthetic(n=500, seed=6)
+    r = run_backtest(build("sma"), candles, interval="1h")
+    assert isinstance(r.trade_returns, list)
+    assert len(r.trade_returns) == r.metrics.num_trades
+
+
+# ---- trade export ---------------------------------------------------------
+
+def test_save_trades_csv():
+    candles = data.synthetic(n=400)
+    r = run_backtest(build("sma"), candles, interval="1h")
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "trades.csv")
+        data.save_trades_csv(r.trades, path)
+        with open(path) as fh:
+            lines = fh.read().splitlines()
+    assert lines[0].startswith("timestamp,side,price")
+    assert len(lines) == len(r.trades) + 1
 
 
 # ---- minimal runner (no pytest required) ----------------------------------

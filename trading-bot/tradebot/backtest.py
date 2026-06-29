@@ -27,6 +27,7 @@ class BacktestResult:
     trades: List[Trade]
     buy_and_hold_return_pct: float
     halted: bool = False
+    trade_returns: List[float] = None   # per-round-trip return fraction
 
     def summary(self) -> str:
         m = self.metrics
@@ -75,6 +76,7 @@ def run_backtest(strategy: Strategy, candles: List[Candle],
     broker = PaperBroker(cash=cash, fee_rate=fee_rate, slippage=slippage)
 
     equity_curve: List[float] = []
+    trade_returns: List[float] = []
     entry_equity = 0.0     # account equity right after the position was opened
     wins = 0
     closed = 0
@@ -94,6 +96,8 @@ def run_backtest(strategy: Strategy, candles: List[Candle],
         if not trade:
             return
         pnl = broker.equity(price) - entry_equity   # position is now flat
+        if entry_equity > 0:
+            trade_returns.append(pnl / entry_equity)
         if pnl > 0:
             wins += 1
             gross_profit += pnl
@@ -119,6 +123,7 @@ def run_backtest(strategy: Strategy, candles: List[Candle],
 
         # 1) Protective exits (intrabar, before acting on new signals).
         if broker.position != 0:
+            manager.update_trailing(bar.high, bar.low)
             exit_price = manager.protective_exit(bar.high, bar.low)
             if exit_price is not None:
                 close_position(bar.timestamp, exit_price)
@@ -165,4 +170,5 @@ def run_backtest(strategy: Strategy, candles: List[Candle],
         trades=broker.trades,
         buy_and_hold_return_pct=round(bnh, 2),
         halted=halted,
+        trade_returns=trade_returns,
     )

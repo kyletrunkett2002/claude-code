@@ -155,6 +155,16 @@ def save_csv(candles: List[Candle], path: str) -> None:
             writer.writerow([c.timestamp, c.open, c.high, c.low, c.close, c.volume])
 
 
+def save_trades_csv(trades, path: str) -> None:
+    """Write a list of executed Trades to CSV for inspection in a spreadsheet."""
+    with open(path, "w", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["timestamp", "side", "price", "quantity", "fee", "equity_after"])
+        for t in trades:
+            writer.writerow([t.timestamp, t.side.value, t.price, t.quantity,
+                             t.fee, t.equity_after])
+
+
 def synthetic(n: int = 500, start_price: float = 100.0, seed: int = 42,
               interval_ms: int = 3_600_000) -> List[Candle]:
     """Generate deterministic pseudo-random candles for offline testing.

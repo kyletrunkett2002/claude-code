@@ -23,6 +23,7 @@ from .backtest import run_backtest
 from .broker import LiveBroker, PaperBroker
 from .engine import LiveEngine
 from .model import Candle
+from .monte_carlo import bootstrap
 from .optimize import DEFAULT_GRIDS, grid_search, walk_forward
 from .portfolio import run_portfolio
 from .risk import RiskConfig
@@ -73,6 +74,7 @@ def _build_risk(args) -> RiskConfig:
     return RiskConfig(
         stop_loss=args.stop_loss,
         take_profit=args.take_profit,
+        trailing_stop=getattr(args, "trailing_stop", 0.0),
         max_drawdown=args.max_drawdown,
         risk_per_trade=args.risk_per_trade,
         position_fraction=args.fraction,
@@ -101,9 +103,37 @@ def cmd_backtest(args) -> int:
     if args.plot:
         print("\nEquity curve:")
         print(plotmod.equity_chart(result.equity_curve))
+    if args.export_trades:
+        datamod.save_trades_csv(result.trades, args.export_trades)
+        print(f"\nWrote {len(result.trades)} executed orders to {args.export_trades}")
     verdict = "BEATS" if result.metrics.total_return_pct > result.buy_and_hold_return_pct else "trails"
     print(f"\nStrategy {verdict} buy-and-hold. "
           "Past performance never guarantees future results.")
+    return 0
+
+
+def cmd_montecarlo(args) -> int:
+    strategy = _build_strategy(args)
+    candles = _load_candles(args)
+    if len(candles) <= strategy.warmup():
+        print("Not enough candles for this strategy's warmup period.", file=sys.stderr)
+        return 1
+    result = run_backtest(strategy, candles, cash=args.cash, fee_rate=args.fee,
+                          slippage=args.slippage, interval=args.interval,
+                          allow_short=args.allow_short, risk=_build_risk(args))
+    if not result.trade_returns:
+        print("The strategy never closed a trade — nothing to simulate. Try more "
+              "candles or different parameters.", file=sys.stderr)
+        return 1
+    mc = bootstrap(result.trade_returns, simulations=args.sims,
+                   big_drawdown_pct=args.big_drawdown)
+    print(f"Monte Carlo robustness: {strategy.name} ({args.symbol} {args.interval})")
+    print(f"  Actual backtest return : {result.metrics.total_return_pct:+.2f}% "
+          f"from {len(result.trade_returns)} trades\n")
+    print(mc.summary())
+    if mc.prob_loss_pct > 25:
+        print("\n⚠️  High chance of a losing outcome — this edge is fragile or "
+              "too few trades to trust.")
     return 0
 
 
@@ -313,6 +343,8 @@ def build_parser() -> argparse.ArgumentParser:
                        help="exit if down this fraction from entry (0.05=5%%)")
         p.add_argument("--take-profit", type=float, default=0.0,
                        help="exit if up this fraction from entry")
+        p.add_argument("--trailing-stop", type=float, default=0.0,
+                       help="trailing stop that ratchets in your favour (0.05=5%%)")
         p.add_argument("--max-drawdown", type=float, default=0.0,
                        help="halt trading if equity falls this far from peak")
         p.add_argument("--risk-per-trade", type=float, default=0.0,
@@ -325,7 +357,17 @@ def build_parser() -> argparse.ArgumentParser:
     bt = sub.add_parser("backtest", help="replay historical data")
     data_args(bt); account_args(bt); risk_args(bt); _add_strategy_args(bt)
     bt.add_argument("--plot", action="store_true", help="draw an ASCII equity curve")
+    bt.add_argument("--export-trades", metavar="PATH",
+                    help="write executed orders to a CSV file")
     bt.set_defaults(func=cmd_backtest)
+
+    # montecarlo
+    mc = sub.add_parser("montecarlo", help="bootstrap trades to stress-test luck")
+    data_args(mc); account_args(mc); risk_args(mc); _add_strategy_args(mc)
+    mc.add_argument("--sims", type=int, default=2000, help="number of simulations")
+    mc.add_argument("--big-drawdown", type=float, default=30.0,
+                    help="drawdown %% to report a probability for")
+    mc.set_defaults(func=cmd_montecarlo)
 
     # optimize
     op = sub.add_parser("optimize", help="grid-search strategy parameters")

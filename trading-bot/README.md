@@ -1,7 +1,7 @@
 # tradebot
 
 A small but serious **crypto trading bot framework** in pure Python — zero
-third-party dependencies, fully offline-capable, 44 tests.
+third-party dependencies, fully offline-capable, 53 tests.
 
 Backtest long *and* short, across **multiple coins** at once, on data from
 **Binance, Coinbase, or Kraken**, with real **risk management**, parameter
@@ -28,6 +28,23 @@ algorithm — it's a disciplined workflow:
 ## Requirements
 
 Python 3.8+. **No third-party packages** — standard library only.
+
+## Install
+
+Run it straight from the repo (no install needed):
+
+```bash
+cd trading-bot
+python -m tradebot --help
+```
+
+Or install it so `tradebot` becomes a command anywhere:
+
+```bash
+cd trading-bot
+pip install -e .
+tradebot --help
+```
 
 ## Quickstart
 
@@ -98,6 +115,8 @@ All of these compose, on any command:
 | `--fraction 0.5` | Fixed: deploy 50% of cash per entry |
 | `--max-position 0.3` | Hard cap on cash deployed per trade |
 
+| `--trailing-stop 0.05` | A stop that ratchets in your favour — trails the best price by 5% and only ever tightens, locking in profit as a trade runs |
+
 `--risk-per-trade` is volatility-aware position sizing — the single most
 important habit separating traders who survive from those who don't.
 
@@ -164,6 +183,29 @@ python -m tradebot optimize -s sma --synthetic 800 --heatmap fast,slow
 A healthy strategy shows a **broad bright region** — many nearby settings work,
 so the edge is robust. A single bright cell in a sea of dark is a cherry-picked
 fluke that won't survive live trading.
+
+### Monte Carlo robustness (how lucky was your backtest?)
+
+A backtest is *one* sequence of trades. The future will deal the same edge in a
+different order — and a strategy can look great purely because its winners
+happened to land in a lucky run. Monte Carlo resamples your trades thousands of
+times to show the *distribution* of what could happen:
+
+```bash
+python -m tradebot montecarlo -s sma --symbol BTCUSDT --interval 1h --sims 3000
+```
+
+```
+  Final return  p5/p50/p95 : +12.0% / +48.0% / +95.0%
+  Max drawdown  p50/p95    : 14.0% / 31.0%
+  Probability of net loss  : 18.0%
+  Probability of >30% drawdown : 6.0%
+```
+
+Now you can reason about risk honestly: *"1-in-5 chance this loses money, 1-in-16
+chance of a 30%+ drawdown."* That beats a single hero number every time.
+(On `--synthetic` data these come out unrealistically rosy — run it on real
+exchange data for meaningful probabilities.)
 
 ### Config-file experiments
 
@@ -241,6 +283,7 @@ tradebot/
   backtest.py     backtesting engine (risk + shorting integrated)
   portfolio.py    multi-coin portfolio backtesting
   optimize.py     grid search + walk-forward validation
+  monte_carlo.py  bootstrap robustness testing
   metrics.py      return, drawdown, Sharpe, Sortino, Calmar, profit factor
   plot.py         ASCII equity charts + parameter heatmaps (no matplotlib)
   config.py       JSON config-file runner
@@ -249,7 +292,9 @@ tradebot/
 examples/
   portfolio.config.json   sample experiment config
 tests/
-  test_tradebot.py   44 offline tests
+  test_tradebot.py   53 offline tests
+pyproject.toml    pip-installable (`tradebot` command)
+LICENSE           MIT
 ```
 
 ## Running the tests

@@ -67,7 +67,8 @@ def run_backtest(strategy: Strategy, candles: List[Candle],
     Each bar, in order: protective stop/target exits are checked against the
     bar's high/low first, then the strategy's signal is applied, then the
     drawdown circuit breaker. Round-trip PnL is measured as the change in
-    account equity between entry and exit, which works for longs and shorts
+    account equity from just *before* the entry to just after the exit, so it
+    includes both the entry and exit costs; this works for longs and shorts
     alike. Win rate and profit factor are measured on those closed round-trips.
     """
     if risk is None:
@@ -108,12 +109,17 @@ def run_backtest(strategy: Strategy, candles: List[Candle],
 
     def open_position(ts: int, price: float, side: int) -> None:
         nonlocal entry_equity
+        # Baseline taken *before* the fill (position is flat, so this is just
+        # cash). Measuring the round-trip from here makes its PnL include the
+        # entry fee and slippage as well as the exit's — otherwise win rate and
+        # profit factor come out slightly too optimistic.
+        baseline = broker.equity(price)
         if side > 0:
             trade = broker.buy(ts, price, risk.entry_fraction())
         else:
             trade = broker.sell_short(ts, price, risk.entry_fraction())
         if trade:
-            entry_equity = broker.equity(price)
+            entry_equity = baseline
             manager.on_entry(trade.price, side=side)
 
     window = strategy.lookback()

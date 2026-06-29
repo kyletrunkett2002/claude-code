@@ -698,6 +698,39 @@ def test_realistic_market_momentum_adds_autocorrelation():
     assert _lag1_autocorr(trend) > _lag1_autocorr(flat) + 0.1
 
 
+# ---- trade accounting (golden, hand-computed) -----------------------------
+
+def test_roundtrip_pnl_includes_entry_and_exit_costs():
+    # A single long round-trip with a known price path and a 0.1% fee, no
+    # slippage. The recorded trade return must equal the hand-computed value
+    # that charges BOTH the entry and the exit fee.
+    class BuyThenSell(SmaCrossover):
+        def warmup(self):
+            return 0
+
+        def lookback(self):
+            return 0
+
+        def evaluate(self, history):
+            n = len(history)
+            if n == 2:
+                return Signal.BUY      # enter at index 1, close = 100
+            if n == 4:
+                return Signal.SELL     # exit at index 3, close = 110
+            return Signal.HOLD
+
+    closes = [100, 100, 110, 110, 90, 90]
+    candles = [Candle(i, c, c, c, c, 1.0) for i, c in enumerate(closes)]
+    r = run_backtest(BuyThenSell(), candles, cash=1000, fee_rate=0.001,
+                     slippage=0.0, interval="1h")
+
+    # Buy 1000 @100 with 1.0 fee -> qty 9.99. Sell @110 -> 1098.9, fee 1.0989.
+    # Final cash 1097.8011; PnL vs the 1000 starting stake = 97.8011.
+    assert len(r.trade_returns) == 1
+    assert abs(r.trade_returns[0] - 0.0978011) < 1e-6
+    assert r.metrics.num_trades == 1 and r.metrics.win_rate_pct == 100.0
+
+
 # ---- performance windowing -------------------------------------------------
 
 def test_lookback_default_is_bounded():

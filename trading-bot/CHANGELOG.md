@@ -35,6 +35,15 @@ All notable changes to tradebot are documented here. This project adheres to
   kurtosis, lag-1 autocorrelation and a plain-English market character read.
 - `keltner` strategy (ATR-band breakout/reversion) — 12 strategies total.
 
+### Fixed
+- **Trade PnL accounting**: round-trip PnL is now measured from just *before*
+  the entry rather than just after, so it includes the entry fee and slippage
+  as well as the exit's. Previously win rate, profit factor, and the Monte Carlo
+  trade returns were slightly optimistic (they omitted the entry cost). The
+  equity curve and all curve-based metrics (return, Sharpe, drawdown,
+  walk-forward) were already correct and are unchanged. Locked in with a
+  hand-computed golden test.
+
 ### Performance
 - Backtester now passes each strategy only its required lookback window instead
   of the full history, turning the replay from O(n²) into O(n·window). A 5000-bar
